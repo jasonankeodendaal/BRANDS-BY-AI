@@ -2,8 +2,55 @@ import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { ScriptLine, VoiceConfig, ScriptTiming } from '../types';
 import { decode, encode, concatenatePcm, getPcmChunkDuration } from '../utils/audioUtils';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// --- API Key Rotation System ---
+const apiKeys = [
+  process.env.API_KEY_1,
+  process.env.API_KEY_2,
+  process.env.API_KEY_3,
+].filter(Boolean) as string[];
 
+/**
+ * A wrapper function that handles API key rotation for Gemini API calls.
+ * It iterates through the available API keys, retrying the call if a quota-related
+ * error is encountered.
+ *
+ * @param apiCall A function that takes a `GoogleGenAI` instance and performs an API call.
+ * @returns The result of the successful API call.
+ * @throws An error if all API keys fail or if a non-quota error occurs.
+ */
+async function withApiKeyRotation<T>(apiCall: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
+  if (apiKeys.length === 0) {
+    throw new Error("No API keys configured. Please set at least VITE_API_KEY_1 in your environment.");
+  }
+
+  let lastError: any = null;
+
+  for (const apiKey of apiKeys) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const result = await apiCall(ai);
+      return result; // Success, return immediately
+    } catch (e: any) {
+      lastError = e;
+      const errorMessage = (e?.message || e.toString()).toLowerCase();
+      
+      // Check for specific quota-related error messages
+      if (errorMessage.includes('quota') || errorMessage.includes('rate limit') || errorMessage.includes('resource has been exhausted')) {
+        console.warn(`API key failed due to quota issue. Switching to the next key.`);
+        continue; // Try the next key
+      } else {
+        // Not a quota error, fail fast
+        throw e;
+      }
+    }
+  }
+
+  // If the loop completes, all keys have failed due to quota issues
+  throw new Error(`All API keys have reached their usage limits. Please try again later. Last error: ${lastError?.message}`);
+}
+
+
+// --- Interfaces & Types ---
 interface Branding {
     name?: string;
     contact?: string;
@@ -18,6 +65,9 @@ interface ThirdHost {
 }
 
 type Accent = 'Default' | 'South African';
+
+
+// --- Core Service Functions ---
 
 export async function generateScript(
     topic: string | undefined, 
@@ -146,36 +196,38 @@ export async function generateScript(
     6.  Ensure the output is a valid JSON array, with each object containing a "speaker" (from the list of provided host names) and their "dialogue" (in ${language}).
     7.  To make the podcast feel real, you MUST include a 'cue' field for most lines. This should be a short, descriptive phrase of the emotion or tone (e.g., 'laughing', 'crying', 'surprised', 'thoughtful'). Cues MUST be in English.
   `;
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-pro',
-    contents: fullPrompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            speaker: {
-              type: Type.STRING,
-              enum: speakerEnum,
-              description: 'The name of the speaker.',
-            },
-            dialogue: {
-              type: Type.STRING,
-              description: "The speaker's line of dialogue.",
-            },
-            cue: {
+    
+  const response = await withApiKeyRotation(async (ai) => 
+    ai.models.generateContent({
+        model: 'gemini-2.5-pro',
+        contents: fullPrompt,
+        config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+            type: Type.ARRAY,
+            items: {
+            type: Type.OBJECT,
+            properties: {
+                speaker: {
                 type: Type.STRING,
-                description: "An optional one-word emotional or behavioral cue (e.g., 'laughing', 'surprised')."
-            }
-          },
-          required: ['speaker', 'dialogue'],
+                enum: speakerEnum,
+                description: 'The name of the speaker.',
+                },
+                dialogue: {
+                type: Type.STRING,
+                description: "The speaker's line of dialogue.",
+                },
+                cue: {
+                    type: Type.STRING,
+                    description: "An optional one-word emotional or behavioral cue (e.g., 'laughing', 'surprised')."
+                }
+            },
+            required: ['speaker', 'dialogue'],
+            },
         },
-      },
-    },
-  });
+        },
+    })
+  );
 
   try {
     const jsonText = response.text.trim();
@@ -226,14 +278,16 @@ async function generateSingleSpeakerAudio(
     speechConfigPayload.voiceConfig = { prebuiltVoiceConfig: { voiceName: voiceConfig.name } };
   }
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-preview-tts",
-    contents: [{ parts: [{ text: fullPrompt }] }],
-    config: {
-      responseModalities: [Modality.AUDIO],
-      speechConfig: speechConfigPayload,
-    },
-  });
+  const response = await withApiKeyRotation(async (ai) =>
+    ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text: fullPrompt }] }],
+        config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: speechConfigPayload,
+        },
+    })
+  );
 
   const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   if (!base64Audio) {
@@ -337,18 +391,20 @@ export async function previewVoice(voiceName: string, language: 'English' | 'Afr
     
     const prompt = `You are a voice actor demonstrating your voice. ${accentInstruction} Read the following line with a warm, natural, and conversational tone: "${previewText}"`;
     
-    const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: prompt }] }],
-        config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-                voiceConfig: {
-                    prebuiltVoiceConfig: { voiceName: voiceName },
+    const response = await withApiKeyRotation(async (ai) => 
+        ai.models.generateContent({
+            model: "gemini-2.5-flash-preview-tts",
+            contents: [{ parts: [{ text: prompt }] }],
+            config: {
+                responseModalities: [Modality.AUDIO],
+                speechConfig: {
+                    voiceConfig: {
+                        prebuiltVoiceConfig: { voiceName: voiceName },
+                    },
                 },
             },
-        },
-    });
+        })
+    );
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!base64Audio) {
@@ -372,16 +428,18 @@ export async function previewClonedVoice(
     
   const prompt = `Your primary task is to create a high-fidelity clone of the provided voice sample. Then, using that cloned voice, please say the following sentence with a warm, natural, and conversational tone. ${accentInstruction} Sentence: "${previewText}"`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-preview-tts",
-    contents: [{ parts: [{ text: prompt }] }],
-    config: {
-      responseModalities: [Modality.AUDIO],
-      speechConfig: {
-        customVoice: { audio: { data: customVoice.data, mimeType: customVoice.mimeType } }
-      },
-    },
-  });
+  const response = await withApiKeyRotation(async (ai) => 
+    ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: [{ parts: [{ text: prompt }] }],
+        config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+            customVoice: { audio: { data: customVoice.data, mimeType: customVoice.mimeType } }
+        },
+        },
+    })
+  );
 
   const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   if (!base64Audio) {
