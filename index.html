@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Podcast Studio</title>
+    
+    <!-- PWA Manifest and Theme -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#e11d48" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Lato', 'sans-serif'],
+              serif: ['Playfair Display', 'serif'],
+            },
+            colors: {
+              'background': '#111111',
+              'surface': '#191919',
+              'input-background': '#27272a',
+              'primary': '#e11d48',
+              'primary-hover': '#be123c',
+              'on-primary': '#ffffff',
+              'text-primary': '#f4f4f5',
+              'text-secondary': '#a1a1aa',
+              'border-color': '#3f3f46',
+              'gold': '#ECB365',
+            },
+            boxShadow: {
+              'gold-glow': '0 0 15px rgba(236, 179, 101, 0.4)',
+              'primary-glow': '0 4px 15px rgba(225, 29, 72, 0.25)',
+            },
+            animation: {
+              'pulse-gold': 'pulse-gold 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            }
+          },
+        },
+      }
+    </script>
+    <style>
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(15px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .fade-in {
+        animation: fadeIn 0.7s ease-out forwards;
+      }
+      @keyframes fadeInScale {
+        from { opacity: 0; transform: scale(0.95) translateY(10px); }
+        to { opacity: 1; transform: scale(1) translateY(0); }
+      }
+      .fade-in-scale {
+        animation: fadeInScale 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+      }
+      .bg-grain {
+        background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800"><filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23noise)" opacity="0.03"/></svg>');
+      }
+      @keyframes pulse-gold {
+        0%, 100% {
+          box-shadow: 0 0 15px rgba(236, 179, 101, 0.4);
+          border-color: #ECB365;
+        }
+        50% {
+          box-shadow: 0 0 25px rgba(236, 179, 101, 0.7);
+          border-color: #fcd9a3; /* a lighter gold for the pulse effect */
+        }
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.27.0"
+  }
+}
+</script>
+</head>
+  <body class="bg-background text-text-primary bg-grain">
+    <div id="root"></div>
+    <!-- pdf.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

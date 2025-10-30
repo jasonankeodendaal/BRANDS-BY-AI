@@ -1,0 +1,7 @@
+{
+  "name": "AI Podcast Studio",
+  "description": "An application to generate a podcast script from a topic or a PDF document, and then synthesize the audio for a two-person podcast conversation between a male and female host.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
