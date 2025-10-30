@@ -2,10 +2,6 @@ import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { ScriptLine, VoiceConfig, ScriptTiming } from '../types';
 import { decode, encode, concatenatePcm, getPcmChunkDuration } from '../utils/audioUtils';
 
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set");
-}
-
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 interface Branding {

@@ -1,12 +1,11 @@
-// Fix: Add reference to node types to resolve 'process' type error.
-/// <reference types="node" />
-
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
+  // FIX: Cast `process` to `any` to bypass TypeScript error for `cwd`.
+  // This is needed if @types/node is not available in the environment.
+  const env = loadEnv(mode, (process as any).cwd(), '');
   return {
     plugins: [react()],
     define: {
