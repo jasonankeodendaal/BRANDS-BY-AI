@@ -1,0 +1,24 @@
+{
+  "short_name": "AI Podcast",
+  "name": "AI Podcast Studio",
+  "description": "An application to generate a podcast script from a topic or a PDF document, and then synthesize the audio for a two-person podcast.",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "scope": "/",
+  "theme_color": "#e11d48",
+  "background_color": "#0a0a0a"
+}
