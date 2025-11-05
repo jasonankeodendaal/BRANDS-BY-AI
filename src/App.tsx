@@ -1,11 +1,12 @@
 import React, { useState, useRef, useCallback, PropsWithChildren, useEffect } from 'react';
 import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming } from './types';
-import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice, generateQualityPreviewAudio } from './services/geminiService';
+import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice, generateQualityPreviewAudio, generateAdText, generateAdScript } from './services/geminiService';
 import { extractTextFromPdf } from './services/pdfService';
-import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, encode, concatenatePcm } from './utils/audioUtils';
-import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon } from './components/Icons';
+import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64 } from './utils/audioUtils';
+import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, DotsIcon, WandIcon, InfoIcon } from './components/Icons';
 
 type Speaker = 'samantha' | 'steward' | 'thirdHost';
+type ActiveTab = 'creator' | 'editor' | 'about';
 
 const Logo = () => (
     <div className="relative flex items-center justify-center" aria-label="Brands by Ai">
@@ -22,9 +23,9 @@ const Logo = () => (
     </div>
 );
 
-const Card: React.FC<PropsWithChildren<{ title: string; icon?: React.ReactNode, className?: string }>> = ({ title, icon, children, className }) => (
+const Card: React.FC<PropsWithChildren<{ title: string; icon?: React.ReactNode, className?: string, titleClassName?: string }>> = ({ title, icon, children, className, titleClassName }) => (
   <div className={`bg-surface rounded-xl shadow-lg border border-zinc-800 overflow-hidden ${className}`}>
-    <div className="p-8 border-b border-zinc-800">
+    <div className={`p-8 border-b border-zinc-800 ${titleClassName}`}>
       <h2 className="text-2xl font-serif font-bold text-text-primary flex items-center gap-3">
         {icon}
         {title}
@@ -37,7 +38,7 @@ const Card: React.FC<PropsWithChildren<{ title: string; icon?: React.ReactNode, 
 );
 
 const StepIndicator: React.FC<{ currentStep: number }> = ({ currentStep }) => {
-  const steps = ['Hosts', 'Content', 'Script', 'Podcast'];
+  const steps = ['Hosts', 'Content', 'Script', 'Studio'];
   const numerals = ['I', 'II', 'III', 'IV'];
   
   return (
@@ -54,9 +55,9 @@ const StepIndicator: React.FC<{ currentStep: number }> = ({ currentStep }) => {
           const isCompleted = currentStep > stepNumber;
           return (
             <div key={step} className="relative z-10 flex flex-col items-center group cursor-default text-center">
-              <div className={`w-16 h-16 rounded-full flex items-center justify-center p-1 border-4 transition-all duration-500 ease-out ${isActive ? 'bg-gold/20 border-gold scale-110 animate-pulse-gold' : isCompleted ? 'bg-primary/20 border-primary' : 'bg-surface border-border-color group-hover:border-gold'}`}>
+               <div className={`w-16 h-16 rounded-full flex items-center justify-center p-1 border-4 transition-all duration-500 ease-out ${isActive ? 'bg-gold/20 border-gold scale-110 animate-pulse-gold' : isCompleted ? 'bg-primary/20 border-primary' : 'bg-surface border-border-color group-hover:border-gold'}`}>
                 <div className={`w-full h-full rounded-full flex items-center justify-center transition-colors duration-500 ${isActive ? 'bg-gold' : isCompleted ? 'bg-primary' : 'bg-surface'}`}>
-                    {isCompleted ? <CheckIcon className="w-7 h-7 text-on-primary" /> : <span className={`font-black font-serif text-xl transition-colors duration-300 ${isActive ? 'text-background' : 'text-text-secondary'}`}>{numerals[index]}</span>}
+                    {isCompleted ? <CheckIcon className="w-7 h-7 text-on-primary" /> : <span className={`font-black font-serif text-xl transition-colors duration-300 ${isActive ? 'text-background' : 'text-text-secondary'}`}>{step === 'Studio' ? <AudioIcon/> : numerals[index]}</span>}
                 </div>
               </div>
               <span className={`mt-4 text-sm font-bold uppercase tracking-widest transition-colors duration-500 w-24 ${isActive || isCompleted ? 'text-text-primary' : 'text-text-secondary group-hover:text-gold'}`}>{step}</span>
@@ -67,6 +68,84 @@ const StepIndicator: React.FC<{ currentStep: number }> = ({ currentStep }) => {
     </div>
   );
 };
+
+const HostEditorCard: React.FC<PropsWithChildren<{
+  name: string;
+  setName: (name: string) => void;
+  voice: string;
+  setVoice: (voice: string) => void;
+  voiceOptions: { name: string; label: string; }[];
+  speakerKey: Speaker;
+  handlePreviewVoice: (speaker: Speaker) => void;
+  isPreviewing: boolean;
+  customSamples: CustomAudioSample[];
+  handleToggleRecording: (speaker: Speaker) => void;
+  isRecording: boolean;
+  audioFileInputRef: React.RefObject<HTMLInputElement>;
+  handleAudioFileChange: (event: React.ChangeEvent<HTMLInputElement>, speaker: Speaker) => void;
+  handleRemoveCustomAudio: (speaker: Speaker, index: number) => void;
+  handlePreviewCustomVoice: (speaker: Speaker) => void;
+  isPreviewingCustom: boolean;
+}>> = ({ name, setName, voice, setVoice, voiceOptions, speakerKey, handlePreviewVoice, isPreviewing, customSamples, handleToggleRecording, isRecording, audioFileInputRef, handleAudioFileChange, handleRemoveCustomAudio, handlePreviewCustomVoice, isPreviewingCustom, children }) => {
+  return (
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 space-y-6">
+      <input type="text" placeholder="Host Name" value={name} onChange={(e) => setName(e.target.value)} className="w-full text-xl bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-3 focus:outline-none focus:border-gold transition font-serif font-bold" />
+      
+      <div className="space-y-3">
+        <label className="block text-sm font-bold text-text-primary tracking-wider">PRE-BUILT VOICE</label>
+        <div className="flex items-center gap-3">
+            <select value={voice} onChange={(e) => setVoice(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition disabled:opacity-50 appearance-none" disabled={customSamples.length > 0}>
+                {voiceOptions.map((v, index) => <option key={`${v.name}-${index}`} value={v.name}>{v.label}</option>)}
+            </select>
+            <button onClick={() => handlePreviewVoice(speakerKey)} disabled={isPreviewing || customSamples.length > 0} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition flex-shrink-0">
+              {isPreviewing ? <LoaderIcon /> : <PlayCircleIcon />}
+            </button>
+        </div>
+      </div>
+
+      <div className="relative text-center my-4">
+        <div className="absolute inset-0 flex items-center" aria-hidden="true"><div className="w-full border-t border-zinc-700"></div></div>
+        <div className="relative flex justify-center"><span className="bg-zinc-900/50 px-3 text-sm font-medium text-text-secondary uppercase tracking-wider">Or</span></div>
+      </div>
+
+      <div className="space-y-4">
+        <label className="block text-sm font-bold text-text-primary tracking-wider">CUSTOM VOICE</label>
+        <p className="text-xs text-zinc-400 -mt-2">Add up to 5 audio samples (at least 10s total) for best results.</p>
+        
+        {customSamples.length > 0 && (
+            <div className="space-y-3 bg-zinc-800/50 border border-zinc-700 rounded-lg p-3 max-h-48 overflow-y-auto">
+                {customSamples.map((sample, index) => (
+                    <div key={index} className="flex justify-between items-center bg-zinc-900 p-2 rounded animate-fade-in-scale">
+                        <span className="truncate text-sm font-semibold flex-1 min-w-0 px-2">{sample.name}</span>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                            <button onClick={() => new Audio(sample.url).play()} className="p-2 bg-zinc-700 rounded-full hover:bg-zinc-600 disabled:opacity-50 transition"><PlayCircleIcon /></button>
+                            <button onClick={() => handleRemoveCustomAudio(speakerKey, index)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition"><TrashIcon /></button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        )}
+
+        <div className="flex gap-4">
+            <button onClick={() => handleToggleRecording(speakerKey)} disabled={customSamples.length >= 5} className={`w-full flex items-center justify-center gap-3 border-2 border-zinc-700 rounded-lg p-4 transition disabled:opacity-50 disabled:cursor-not-allowed ${isRecording ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent hover:border-gold'}`}>
+                <MicIcon /> {isRecording ? 'Stop' : 'Record'}
+            </button>
+            <input type="file" accept="audio/*" ref={audioFileInputRef} onChange={(e) => handleAudioFileChange(e, speakerKey)} className="hidden" />
+            <button onClick={() => audioFileInputRef.current?.click()} disabled={customSamples.length >= 5} className="w-full flex items-center justify-center gap-3 bg-transparent border-2 border-zinc-700 rounded-lg p-4 hover:border-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
+                <UploadIcon /> Upload
+            </button>
+        </div>
+        
+        {customSamples.length > 0 && (
+             <button onClick={() => handlePreviewCustomVoice(speakerKey)} disabled={isPreviewingCustom} className="w-full flex items-center justify-center gap-3 bg-gold/10 border-2 border-gold rounded-lg p-4 hover:bg-gold/20 text-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
+                {isPreviewingCustom ? <LoaderIcon/> : <VolumeHighIcon/>} Preview Cloned Voice
+            </button>
+        )}
+      </div>
+       {children}
+    </div>
+  );
+}
 
 interface StepHostsProps {
   error: string;
@@ -131,7 +210,7 @@ const StepHosts: React.FC<StepHostsProps> = ({
   handlePreviewCustomVoice, handleRemoveCustomAudio, handleToggleRecording, handleAudioFileChange,
   isPreviewingQuality, handlePreviewQuality
 }) => (
-  <Card title="I: Define Your Hosts" className="max-w-4xl mx-auto">
+  <Card title="I: Define Your Hosts" className="max-w-6xl mx-auto">
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
         <p className="text-text-secondary text-center sm:text-left">Preview the hyper-realistic voice quality and natural conversation flow.</p>
         <button 
@@ -143,159 +222,79 @@ const StepHosts: React.FC<StepHostsProps> = ({
         </button>
       </div>
       {error && <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-4"><ErrorIcon /><p className="font-semibold text-red-300">{error}</p></div>}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <input type="text" placeholder="Female Host Name" value={samanthaName} onChange={(e) => setSamanthaName(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
-          <input type="text" placeholder="Male Host Name" value={stewardName} onChange={(e) => setStewardName(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
+      
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <HostEditorCard
+              name={samanthaName} setName={setSamanthaName}
+              voice={samanthaVoice} setVoice={setSamanthaVoice}
+              voiceOptions={femaleVoices}
+              speakerKey="samantha"
+              handlePreviewVoice={handlePreviewVoice} isPreviewing={isPreviewingSamantha}
+              customSamples={samanthaCustomSamples}
+              handleToggleRecording={handleToggleRecording} isRecording={isRecordingSamantha}
+              audioFileInputRef={samanthaAudioFileInputRef}
+              handleAudioFileChange={handleAudioFileChange}
+              handleRemoveCustomAudio={handleRemoveCustomAudio}
+              handlePreviewCustomVoice={handlePreviewCustomVoice}
+              isPreviewingCustom={isPreviewingSamanthaCustom}
+          />
+          <HostEditorCard
+              name={stewardName} setName={setStewardName}
+              voice={stewardVoice} setVoice={setStewardVoice}
+              voiceOptions={maleVoices}
+              speakerKey="steward"
+              handlePreviewVoice={handlePreviewVoice} isPreviewing={isPreviewingSteward}
+              customSamples={stewardCustomSamples}
+              handleToggleRecording={handleToggleRecording} isRecording={isRecordingSteward}
+              audioFileInputRef={stewardAudioFileInputRef}
+              handleAudioFileChange={handleAudioFileChange}
+              handleRemoveCustomAudio={handleRemoveCustomAudio}
+              handlePreviewCustomVoice={handlePreviewCustomVoice}
+              isPreviewingCustom={isPreviewingStewardCustom}
+          />
       </div>
-      <div className="space-y-6 border border-zinc-800 rounded-xl p-6">
-          <label className="block text-md font-bold text-text-primary mb-2">{samanthaName || 'Female Host'}'s Voice</label>
-          <div className="flex items-center gap-4">
-              <select value={samanthaVoice} onChange={(e) => setSamanthaVoice(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition disabled:opacity-50 appearance-none" disabled={samanthaCustomSamples.length > 0}>
-                  {femaleVoices.map((voice, index) => <option key={`${voice.name}-${index}`} value={voice.name}>{voice.label}</option>)}
-              </select>
-              <button onClick={() => handlePreviewVoice('samantha')} disabled={isPreviewingSamantha || samanthaCustomSamples.length > 0} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition">
-                {isPreviewingSamantha ? <LoaderIcon /> : <PlayCircleIcon />}
-              </button>
-          </div>
-           <div className="space-y-4 pt-4">
-                <label className="block text-sm font-medium text-text-secondary">OR USE A CUSTOM VOICE</label>
-                <p className="text-xs text-zinc-400 -mt-2">Add up to 5 audio samples (at least 10 seconds total recommended) for higher quality voice cloning.</p>
-                {samanthaCustomSamples.length > 0 && (
-                    <div className="space-y-3 bg-zinc-800/50 border border-zinc-700 rounded-lg p-3">
-                        {samanthaCustomSamples.map((sample, index) => (
-                            <div key={index} className="flex justify-between items-center bg-zinc-900 p-2 rounded animate-fade-in-scale">
-                                <span className="truncate text-sm font-semibold flex-1 min-w-0 px-2">{sample.name}</span>
-                                <div className="flex items-center gap-2 flex-shrink-0">
-                                    <button onClick={() => new Audio(sample.url).play()} className="p-2 bg-zinc-700 rounded-full hover:bg-zinc-600 disabled:opacity-50 transition"><PlayCircleIcon /></button>
-                                    <button onClick={() => handleRemoveCustomAudio('samantha', index)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition"><TrashIcon /></button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-                <div className="flex gap-4">
-                    <button onClick={() => handleToggleRecording('samantha')} disabled={samanthaCustomSamples.length >= 5} className={`w-full flex items-center justify-center gap-3 border-2 border-zinc-700 rounded-lg p-4 transition disabled:opacity-50 disabled:cursor-not-allowed ${isRecordingSamantha ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent hover:border-gold'}`}>
-                        <MicIcon /> {isRecordingSamantha ? 'Stop Recording' : 'Record'}
-                    </button>
-                    <input type="file" accept="audio/*" ref={samanthaAudioFileInputRef} onChange={(e) => handleAudioFileChange(e, 'samantha')} className="hidden" />
-                    <button onClick={() => samanthaAudioFileInputRef.current?.click()} disabled={samanthaCustomSamples.length >= 5} className="w-full flex items-center justify-center gap-3 bg-transparent border-2 border-zinc-700 rounded-lg p-4 hover:border-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        <UploadIcon /> Upload
-                    </button>
-                </div>
-                {samanthaCustomSamples.length > 0 && (
-                     <button onClick={() => handlePreviewCustomVoice('samantha')} disabled={isPreviewingSamanthaCustom} className="w-full flex items-center justify-center gap-3 bg-gold/10 border-2 border-gold rounded-lg p-4 hover:bg-gold/20 text-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        {isPreviewingSamanthaCustom ? <LoaderIcon/> : <VolumeHighIcon/>} Preview Cloned Voice
-                    </button>
-                )}
-            </div>
-      </div>
-       <div className="space-y-6 border border-zinc-800 rounded-xl p-6">
-          <label className="block text-md font-bold text-text-primary mb-2">{stewardName || 'Male Host'}'s Voice</label>
-           <div className="flex items-center gap-4">
-              <select value={stewardVoice} onChange={(e) => setStewardVoice(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition disabled:opacity-50 appearance-none" disabled={stewardCustomSamples.length > 0}>
-                  {maleVoices.map((voice, index) => <option key={`${voice.name}-${index}`} value={voice.name}>{voice.label}</option>)}
-              </select>
-              <button onClick={() => handlePreviewVoice('steward')} disabled={isPreviewingSteward || stewardCustomSamples.length > 0} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition">
-                {isPreviewingSteward ? <LoaderIcon /> : <PlayCircleIcon />}
-              </button>
-          </div>
-          <div className="space-y-4 pt-4">
-              <label className="block text-sm font-medium text-text-secondary">OR USE A CUSTOM VOICE</label>
-              <p className="text-xs text-zinc-400 -mt-2">Add up to 5 audio samples (at least 10 seconds total recommended) for higher quality voice cloning.</p>
-              {stewardCustomSamples.length > 0 && (
-                    <div className="space-y-3 bg-zinc-800/50 border border-zinc-700 rounded-lg p-3">
-                        {stewardCustomSamples.map((sample, index) => (
-                            <div key={index} className="flex justify-between items-center bg-zinc-900 p-2 rounded animate-fade-in-scale">
-                                <span className="truncate text-sm font-semibold flex-1 min-w-0 px-2">{sample.name}</span>
-                                <div className="flex items-center gap-2 flex-shrink-0">
-                                    <button onClick={() => new Audio(sample.url).play()} className="p-2 bg-zinc-700 rounded-full hover:bg-zinc-600 disabled:opacity-50 transition"><PlayCircleIcon /></button>
-                                    <button onClick={() => handleRemoveCustomAudio('steward', index)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition"><TrashIcon /></button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-                <div className="flex gap-4">
-                   <button onClick={() => handleToggleRecording('steward')} disabled={stewardCustomSamples.length >= 5} className={`w-full flex items-center justify-center gap-3 border-2 border-zinc-700 rounded-lg p-4 transition disabled:opacity-50 disabled:cursor-not-allowed ${isRecordingSteward ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent hover:border-gold'}`}>
-                    <MicIcon /> {isRecordingSteward ? 'Stop Recording' : 'Record'}
-                  </button>
-                  <input type="file" accept="audio/*" ref={stewardAudioFileInputRef} onChange={(e) => handleAudioFileChange(e, 'steward')} className="hidden" />
-                  <button onClick={() => stewardAudioFileInputRef.current?.click()} disabled={stewardCustomSamples.length >= 5} className="w-full flex items-center justify-center gap-3 bg-transparent border-2 border-zinc-700 rounded-lg p-4 hover:border-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
-                    <UploadIcon /> Upload
-                  </button>
-                </div>
-                {stewardCustomSamples.length > 0 && (
-                     <button onClick={() => handlePreviewCustomVoice('steward')} disabled={isPreviewingStewardCustom} className="w-full flex items-center justify-center gap-3 bg-gold/10 border-2 border-gold rounded-lg p-4 hover:bg-gold/20 text-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        {isPreviewingStewardCustom ? <LoaderIcon/> : <VolumeHighIcon/>} Preview Cloned Voice
-                    </button>
-                )}
-            </div>
-      </div>
-      <div className="space-y-6 border border-zinc-700 rounded-xl p-6 transition-all duration-300">
+
+      <div className="space-y-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 transition-all duration-300">
         <div className="flex justify-between items-center">
-          <h3 className="text-lg font-semibold text-text-primary">Add Guest Speaker</h3>
+          <h3 className="text-xl font-serif font-bold text-text-primary">Add Guest Speaker</h3>
           <label htmlFor="third-host-toggle" className="flex items-center cursor-pointer">
             <div className="relative"><input id="third-host-toggle" type="checkbox" className="sr-only" checked={isThirdHostEnabled} onChange={() => setIsThirdHostEnabled(!isThirdHostEnabled)} /><div className="block bg-zinc-700 w-12 h-7 rounded-full"></div><div className={`dot absolute left-1 top-1 bg-white w-5 h-5 rounded-full transition-transform ${isThirdHostEnabled ? 'translate-x-full bg-gold' : ''}`}></div></div>
           </label>
         </div>
         {isThirdHostEnabled && (
-          <div className="space-y-8 pt-6 border-t border-zinc-800">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
-              <input type="text" placeholder="Guest Name" value={thirdHostName} onChange={(e) => setThirdHostName(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
-              <input type="text" placeholder="Guest Role (e.g., Expert)" value={thirdHostRole} onChange={(e) => setThirdHostRole(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-2">GUEST'S GENDER</label>
-              <select value={thirdHostGender} onChange={(e) => setThirdHostGender(e.target.value as any)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-2">{thirdHostName || 'Guest'}'s PRE-BUILT VOICE</label>
-              <div className="flex items-center gap-4">
-                  <select value={thirdHostVoice} onChange={(e) => setThirdHostVoice(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition disabled:opacity-50 appearance-none" disabled={thirdHostCustomSamples.length > 0}>
-                      {(thirdHostGender === 'female' ? femaleVoices : maleVoices).map((voice, index) => <option key={`${voice.name}-${index}`} value={voice.name}>{voice.label}</option>)}
-                  </select>
-                  <button onClick={() => handlePreviewVoice('thirdHost')} disabled={isPreviewingThirdHost || thirdHostCustomSamples.length > 0} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition">
-                    {isPreviewingThirdHost ? <LoaderIcon /> : <PlayCircleIcon />}
-                  </button>
-              </div>
-            </div>
-             <div className="space-y-4 pt-4">
-                <label className="block text-sm font-medium text-text-secondary">OR USE A CUSTOM VOICE FOR {thirdHostName || 'Guest'}</label>
-                <p className="text-xs text-zinc-400 -mt-2">Add up to 5 audio samples (at least 10 seconds total recommended) for higher quality voice cloning.</p>
-                {thirdHostCustomSamples.length > 0 && (
-                    <div className="space-y-3 bg-zinc-800/50 border border-zinc-700 rounded-lg p-3">
-                        {thirdHostCustomSamples.map((sample, index) => (
-                            <div key={index} className="flex justify-between items-center bg-zinc-900 p-2 rounded animate-fade-in-scale">
-                                <span className="truncate text-sm font-semibold flex-1 min-w-0 px-2">{sample.name}</span>
-                                <div className="flex items-center gap-2 flex-shrink-0">
-                                    <button onClick={() => new Audio(sample.url).play()} className="p-2 bg-zinc-700 rounded-full hover:bg-zinc-600 disabled:opacity-50 transition"><PlayCircleIcon /></button>
-                                    <button onClick={() => handleRemoveCustomAudio('thirdHost', index)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition"><TrashIcon /></button>
-                                </div>
-                            </div>
-                        ))}
+          <div className="space-y-8 pt-6 border-t border-zinc-800 animate-fade-in-scale">
+             <HostEditorCard
+                name={thirdHostName} setName={setThirdHostName}
+                voice={thirdHostVoice} setVoice={setThirdHostVoice}
+                voiceOptions={thirdHostGender === 'female' ? femaleVoices : maleVoices}
+                speakerKey="thirdHost"
+                handlePreviewVoice={handlePreviewVoice} isPreviewing={isPreviewingThirdHost}
+                customSamples={thirdHostCustomSamples}
+                handleToggleRecording={handleToggleRecording} isRecording={isRecordingThirdHost}
+                audioFileInputRef={thirdHostAudioFileInputRef}
+                handleAudioFileChange={handleAudioFileChange}
+                handleRemoveCustomAudio={handleRemoveCustomAudio}
+                handlePreviewCustomVoice={handlePreviewCustomVoice}
+                isPreviewingCustom={isPreviewingThirdHostCustom}
+             >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <div>
+                        <label className="block text-sm font-bold text-text-primary tracking-wider mb-2">GUEST ROLE</label>
+                        <input type="text" placeholder="e.g., Expert" value={thirdHostRole} onChange={(e) => setThirdHostRole(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition" />
                     </div>
-                )}
-                <div className="flex gap-4">
-                   <button onClick={() => handleToggleRecording('thirdHost')} disabled={thirdHostCustomSamples.length >= 5} className={`w-full flex items-center justify-center gap-3 border-2 border-zinc-700 rounded-lg p-4 transition disabled:opacity-50 disabled:cursor-not-allowed ${isRecordingThirdHost ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent hover:border-gold'}`}>
-                    <MicIcon /> {isRecordingThirdHost ? 'Stop Recording' : 'Record'}
-                  </button>
-                  <input type="file" accept="audio/*" ref={thirdHostAudioFileInputRef} onChange={(e) => handleAudioFileChange(e, 'thirdHost')} className="hidden" />
-                  <button onClick={() => thirdHostAudioFileInputRef.current?.click()} disabled={thirdHostCustomSamples.length >= 5} className="w-full flex items-center justify-center gap-3 bg-transparent border-2 border-zinc-700 rounded-lg p-4 hover:border-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
-                    <UploadIcon /> Upload
-                  </button>
+                    <div>
+                        <label className="block text-sm font-bold text-text-primary tracking-wider mb-2">GUEST GENDER</label>
+                        <select value={thirdHostGender} onChange={(e) => setThirdHostGender(e.target.value as any)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
+                            <option value="male">Male</option>
+                            <option value="female">Female</option>
+                        </select>
+                    </div>
                 </div>
-                 {thirdHostCustomSamples.length > 0 && (
-                     <button onClick={() => handlePreviewCustomVoice('thirdHost')} disabled={isPreviewingThirdHostCustom} className="w-full flex items-center justify-center gap-3 bg-gold/10 border-2 border-gold rounded-lg p-4 hover:bg-gold/20 text-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        {isPreviewingThirdHostCustom ? <LoaderIcon/> : <VolumeHighIcon/>} Preview Cloned Voice
-                    </button>
-                )}
-            </div>
+            </HostEditorCard>
           </div>
         )}
       </div>
+
       <div className="pt-8 border-t border-zinc-800 flex justify-end">
           <button onClick={() => { setError(''); setCurrentStep(2) }} disabled={!areHostsValid()} className="bg-primary text-on-primary font-bold py-4 px-10 rounded-lg hover:bg-primary-hover transition flex items-center gap-2 text-lg disabled:bg-zinc-600 shadow-primary-glow">
               Next: Content <ChevronRightIcon />
@@ -319,8 +318,6 @@ interface StepContentProps {
   fileName: string;
   fileInputRef: React.RefObject<HTMLInputElement>;
   handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  combineScripts: boolean;
-  setCombineScripts: (combine: boolean) => void;
   samanthaName: string;
   stewardName: string;
   manualScriptText: string;
@@ -328,19 +325,18 @@ interface StepContentProps {
   customRules: string;
   setCustomRules: (rules: string) => void;
   setCurrentStep: (step: number) => void;
-  handleGenerateScript: (isCustom?: boolean) => void;
+  handleGenerateScript: () => void;
   isLoadingScript: boolean;
   areContentInputsValid: () => boolean;
-  pdfText: string;
 }
 
 const StepContent: React.FC<StepContentProps> = ({
   error, episodeTitle, setEpisodeTitle, episodeNumber, setEpisodeNumber,
   episodeLength, setEpisodeLength, language, setLanguage, prompt, setPrompt, 
-  fileName, fileInputRef, handleFileChange, combineScripts, setCombineScripts, 
+  fileName, fileInputRef, handleFileChange, 
   samanthaName, stewardName, manualScriptText, setManualScriptText, customRules, 
   setCustomRules, setCurrentStep, handleGenerateScript, isLoadingScript, 
-  areContentInputsValid, pdfText
+  areContentInputsValid
 }) => (
   <Card title="II: Content & AI Rules" className="max-w-4xl mx-auto">
     {error && <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-4"><ErrorIcon /><p className="font-semibold text-red-300">{error}</p></div>}
@@ -393,16 +389,8 @@ const StepContent: React.FC<StepContentProps> = ({
       </div>
       <div className="relative my-4">
         <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-zinc-800"></div></div>
-        <div className="relative flex justify-center items-center">
-          <span className="bg-surface px-4 text-sm text-text-secondary font-bold tracking-widest">{combineScripts ? "AND" : "OR"}</span>
-            <label htmlFor="combine-toggle" className="flex items-center cursor-pointer">
-              <div className="relative">
-                <input id="combine-toggle" type="checkbox" className="sr-only" checked={combineScripts} onChange={() => setCombineScripts(!combineScripts)} />
-                <div className="block bg-zinc-700 w-12 h-7 rounded-full"></div>
-                <div className={`dot absolute left-1 top-1 bg-white w-5 h-5 rounded-full transition-transform ${combineScripts ? 'translate-x-full bg-gold' : ''}`}></div>
-              </div>
-              <div className="ml-3 text-text-secondary text-xs font-semibold tracking-widest">COMBINE</div>
-            </label>
+        <div className="relative flex justify-center">
+            <span className="bg-surface px-4 text-sm text-text-secondary font-semibold">AI generation and a custom script can be used together.</span>
         </div>
       </div>
       <div className="space-y-4">
@@ -417,7 +405,7 @@ const StepContent: React.FC<StepContentProps> = ({
           <button onClick={() => setCurrentStep(1)} className="font-bold py-4 px-10 rounded-lg hover:bg-zinc-800 transition flex items-center gap-2 text-lg">
               <ChevronLeftIcon /> Back
           </button>
-          <button onClick={() => handleGenerateScript(manualScriptText && !prompt && !pdfText)} disabled={isLoadingScript || !areContentInputsValid()} className="bg-primary text-on-primary font-bold py-4 px-10 rounded-lg hover:bg-primary-hover transition flex items-center gap-2 text-lg disabled:bg-zinc-600 shadow-primary-glow">
+          <button onClick={() => handleGenerateScript()} disabled={isLoadingScript || !areContentInputsValid()} className="bg-primary text-on-primary font-bold py-4 px-10 rounded-lg hover:bg-primary-hover transition flex items-center gap-2 text-lg disabled:bg-zinc-600 shadow-primary-glow">
               {isLoadingScript ? <><LoaderIcon />Generating...</> : <><ScriptIcon /> Generate Script</>}
           </button>
       </div>
@@ -430,9 +418,10 @@ interface ScriptDisplayProps {
     isEditable?: boolean;
     activeLineIndex?: number | null;
     onLineClick?: (lineIndex: number) => void;
+    areTimingsStale?: boolean;
 }
 
-const ScriptDisplay: React.FC<ScriptDisplayProps> = ({ script, setScript, isEditable, activeLineIndex, onLineClick }) => {
+const ScriptDisplay: React.FC<ScriptDisplayProps> = ({ script, setScript, isEditable, activeLineIndex, onLineClick, areTimingsStale }) => {
     const handleDialogueChange = (index: number, newDialogue: string) => {
         if (setScript) {
             const updatedScript = [...script];
@@ -443,13 +432,18 @@ const ScriptDisplay: React.FC<ScriptDisplayProps> = ({ script, setScript, isEdit
 
     return (
         <div className="space-y-6">
+            {areTimingsStale && (
+                 <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 text-center">
+                    <p className="font-semibold text-yellow-300 text-sm">Audio has been edited. Script playback sync is disabled.</p>
+                </div>
+            )}
             {script.map((line, index) => {
-                const isActive = activeLineIndex === index;
+                const isActive = activeLineIndex === index && !areTimingsStale;
                 return (
                     <div 
                         key={index} 
-                        className={`grid grid-cols-4 gap-4 p-4 rounded-lg transition-all duration-300 ${onLineClick ? 'cursor-pointer hover:bg-zinc-800/60' : ''} ${isActive ? 'bg-gold/10' : ''}`}
-                        onClick={onLineClick ? () => onLineClick(index) : undefined}
+                        className={`grid grid-cols-4 gap-4 p-4 rounded-lg transition-all duration-300 ${onLineClick && !areTimingsStale ? 'cursor-pointer hover:bg-zinc-800/60' : ''} ${isActive ? 'bg-gold/10' : ''}`}
+                        onClick={onLineClick && !areTimingsStale ? () => onLineClick(index) : undefined}
                     >
                         <div className="col-span-1">
                             <p className={`font-serif font-bold ${isActive ? 'text-gold' : 'text-text-primary'}`}>{line.speaker}</p>
@@ -545,19 +539,30 @@ const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
     );
 };
 
-interface StepFinalPodcastProps {
+interface StepStudioProps {
   audioData: string;
+  setAudioData: (data: string) => void;
   script: ScriptLine[];
   scriptTimings: ScriptTiming[];
   handleDownloadAudio: () => void;
   handleStartOver: () => void;
   handleSaveOrUpdateEpisode: () => void;
   loadedEpisodeId: string | null;
+  areTimingsStale: boolean;
+  setAreTimingsStale: (stale: boolean) => void;
+  adText: string | null;
+  setAdText: (text: string | null) => void;
+  adScript: string | null;
+  setAdScript: (script: string | null) => void;
+  episodeTitle: string;
+  brandedName: string;
 }
 
-const StepFinalPodcast: React.FC<StepFinalPodcastProps> = ({
-  audioData, script, scriptTimings,
-  handleDownloadAudio, handleStartOver, handleSaveOrUpdateEpisode, loadedEpisodeId
+const StepStudio: React.FC<StepStudioProps> = ({
+  audioData, setAudioData, script, scriptTimings,
+  handleDownloadAudio, handleStartOver, handleSaveOrUpdateEpisode, loadedEpisodeId,
+  areTimingsStale, setAreTimingsStale, adText, setAdText, adScript, setAdScript,
+  episodeTitle, brandedName
 }) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -567,7 +572,12 @@ const StepFinalPodcast: React.FC<StepFinalPodcastProps> = ({
     const audioRef = useRef<HTMLAudioElement>(null);
     const waveformRef = useRef<HTMLCanvasElement>(null);
     const [activeLineIndex, setActiveLineIndex] = useState<number | null>(null);
-
+    const [isEditorActive, setIsEditorActive] = useState(false);
+    const [selection, setSelection] = useState<{ start: number, end: number} | null>(null);
+    const isDraggingRef = useRef(false);
+    const [audioHistory, setAudioHistory] = useState<string[]>([]);
+    const [isLoadingAd, setIsLoadingAd] = useState<string | null>(null);
+    
     const formatTime = (time: number) => {
         const minutes = Math.floor(time / 60);
         const seconds = Math.floor(time % 60);
@@ -599,98 +609,98 @@ const StepFinalPodcast: React.FC<StepFinalPodcastProps> = ({
         if (!ctx) return;
         ctx.scale(dpr, dpr);
         
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = '#a1a1aa';
-        
         const width = canvas.width / dpr;
         const height = canvas.height / dpr;
         const centerY = height / 2;
         
         ctx.clearRect(0, 0, width, height);
 
-        const draw = () => {
-          ctx.clearRect(0, 0, width, height);
-          
-          // Draw full waveform in gray
-          ctx.beginPath();
-          ctx.moveTo(0, centerY);
-          for(let i = 0; i < normalizedData.length; i++) {
-              const x = (i / normalizedData.length) * width;
-              const y = normalizedData[i] * centerY + centerY;
-              ctx.lineTo(x, y);
-          }
-          ctx.stroke();
-          
-          // Draw progress in gold
-          const progress = (currentTime / duration);
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(0, 0, width * progress, height);
-          ctx.clip();
-          
-          ctx.strokeStyle = '#ECB365';
-          ctx.beginPath();
-          ctx.moveTo(0, centerY);
-          for(let i = 0; i < normalizedData.length; i++) {
-              const x = (i / normalizedData.length) * width;
-              const y = normalizedData[i] * centerY + centerY;
-              ctx.lineTo(x, y);
-          }
-          ctx.stroke();
-          ctx.restore();
-        };
+        // Draw full waveform in gray
+        ctx.strokeStyle = '#a1a1aa';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        for(let i = 0; i < normalizedData.length; i++) {
+            const x = (i / normalizedData.length) * width;
+            const y = normalizedData[i] * centerY + centerY;
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        
+        // Draw progress in gold
+        const progress = duration > 0 ? (currentTime / duration) : 0;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, width * progress, height);
+        ctx.clip();
+        
+        ctx.strokeStyle = '#ECB365';
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        for(let i = 0; i < normalizedData.length; i++) {
+            const x = (i / normalizedData.length) * width;
+            const y = normalizedData[i] * centerY + centerY;
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.restore();
 
-        draw();
+        // Draw selection if active
+        if (isEditorActive && selection) {
+            ctx.fillStyle = 'rgba(225, 29, 72, 0.3)';
+            const startX = (selection.start / duration) * width;
+            const endX = (selection.end / duration) * width;
+            ctx.fillRect(startX, 0, endX - startX, height);
+        }
 
-    }, [currentTime, duration]);
+    }, [currentTime, duration, isEditorActive, selection]);
 
     // Effect for visualizing audio
     useEffect(() => {
-        if (!audioData || !waveformRef.current) return;
+        if (!audioData) return;
         
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         const rawData = decode(audioData);
-        const buffer = audioContext.createBuffer(1, rawData.length / 2, 24000);
-        const channelData = buffer.getChannelData(0);
         const pcm = new Int16Array(rawData.buffer);
+        const channelData = new Float32Array(pcm.length);
         for (let i = 0; i < pcm.length; i++) {
             channelData[i] = pcm[i] / 32768.0;
         }
 
-        const filteredData = [];
         const samples = 400; // Number of samples to draw
-        const blockSize = Math.floor(buffer.length / samples);
+        const blockSize = Math.floor(channelData.length / samples);
+        const filteredData = [];
         for (let i = 0; i < samples; i++) {
-            let blockStart = blockSize * i;
             let sum = 0;
             for (let j = 0; j < blockSize; j++) {
-                sum = sum + Math.abs(channelData[blockStart + j]);
+                sum = sum + Math.abs(channelData[blockSize * i + j]);
             }
             filteredData.push(sum / blockSize);
         }
 
-        const multiplier = Math.pow(Math.max(...filteredData), -1);
+        const multiplier = Math.pow(Math.max(...filteredData), -1) || 1;
         const normalizedData = filteredData.map(n => n * multiplier * 2 - 1);
         
         drawWaveform(normalizedData);
         
-    }, [audioData, drawWaveform]);
+    }, [audioData, drawWaveform, currentTime, selection, isEditorActive]);
 
 
     useEffect(() => {
         const audio = audioRef.current;
         if (!audio) return;
         
-        const setAudioData = () => { setDuration(audio.duration); setCurrentTime(audio.currentTime); };
+        const setAudioData = () => { if (isFinite(audio.duration)) setDuration(audio.duration); setCurrentTime(audio.currentTime); };
         const setAudioTime = () => setCurrentTime(audio.currentTime);
         const setAudioEnd = () => setIsPlaying(false);
 
         audio.addEventListener('loadedmetadata', setAudioData);
+        audio.addEventListener('durationchange', setAudioData);
         audio.addEventListener('timeupdate', setAudioTime);
         audio.addEventListener('ended', setAudioEnd);
 
         return () => {
             audio.removeEventListener('loadedmetadata', setAudioData);
+            audio.removeEventListener('durationchange', setAudioData);
             audio.removeEventListener('timeupdate', setAudioTime);
             audio.removeEventListener('ended', setAudioEnd);
         };
@@ -698,11 +708,12 @@ const StepFinalPodcast: React.FC<StepFinalPodcastProps> = ({
     
     // Find active script line
     useEffect(() => {
+        if (areTimingsStale) return;
         const activeLine = scriptTimings.find(
             timing => currentTime >= timing.startTime && currentTime < timing.startTime + timing.duration
         );
         setActiveLineIndex(activeLine ? activeLine.lineIndex : null);
-    }, [currentTime, scriptTimings]);
+    }, [currentTime, scriptTimings, areTimingsStale]);
 
 
     const togglePlayPause = () => {
@@ -723,13 +734,22 @@ const StepFinalPodcast: React.FC<StepFinalPodcastProps> = ({
         }
     };
 
-    const handleWaveformClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
-        if (duration && waveformRef.current) {
-            const rect = waveformRef.current.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const width = rect.width;
-            const seekTime = (x / width) * duration;
-            handleSeek(seekTime);
+    const handleWaveformInteraction = (event: React.MouseEvent<HTMLCanvasElement>, type: 'down' | 'move' | 'up') => {
+        if (!isEditorActive || !waveformRef.current || duration === 0) return;
+        const rect = waveformRef.current.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const time = Math.max(0, Math.min((x / rect.width) * duration, duration));
+
+        if (type === 'down') {
+            isDraggingRef.current = true;
+            setSelection({ start: time, end: time });
+        } else if (type === 'move' && isDraggingRef.current && selection) {
+            setSelection({ ...selection, end: time });
+        } else if (type === 'up') {
+            isDraggingRef.current = false;
+            if (selection && selection.start > selection.end) {
+                setSelection({ start: selection.end, end: selection.start });
+            }
         }
     };
     
@@ -747,13 +767,71 @@ const StepFinalPodcast: React.FC<StepFinalPodcastProps> = ({
             audioRef.current.playbackRate = rate;
         }
     };
+
+    const handleAudioEdit = (type: 'cut' | 'trim') => {
+        if (!selection || audioData === null) return;
+        setAudioHistory(prev => [...prev, audioData]);
+        const pcmData = decode(audioData);
+        const bytesPerSample = 2; // 16-bit
+        const sampleRate = 24000;
+        const startByte = Math.floor(selection.start * sampleRate * bytesPerSample);
+        const endByte = Math.floor(selection.end * sampleRate * bytesPerSample);
+        let newData;
+        if (type === 'cut') {
+            const part1 = pcmData.slice(0, startByte);
+            const part2 = pcmData.slice(endByte);
+            newData = concatenatePcm([part1, part2]);
+        } else { // trim
+            newData = pcmData.slice(startByte, endByte);
+        }
+        setAudioData(encode(newData));
+        setAreTimingsStale(true);
+        setSelection(null);
+    };
+
+    const handleUndo = () => {
+        if (audioHistory.length > 0) {
+            const lastState = audioHistory[audioHistory.length - 1];
+            setAudioData(lastState);
+            setAudioHistory(prev => prev.slice(0, -1));
+        }
+    };
+
+    const handleGenerateAd = async (type: 'text' | 'script') => {
+        if (!script) return;
+        setIsLoadingAd(type);
+        try {
+            if (type === 'text') {
+                const text = await generateAdText(script, episodeTitle, brandedName);
+                setAdText(text);
+            } else {
+                const ad = await generateAdScript(script, episodeTitle, brandedName);
+                setAdScript(ad);
+            }
+        } catch (e) {
+            // Handle error
+        } finally {
+            setIsLoadingAd(null);
+        }
+    };
+
+    const copyToClipboard = (text: string) => {
+        navigator.clipboard.writeText(text);
+    };
     
     return (
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10">
             <div className="flex flex-col gap-8">
-                <Card title="IV: Your Podcast is Ready!">
+                <Card title="IV: Production Studio">
                     <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl space-y-4">
-                        <canvas ref={waveformRef} className="w-full h-20 cursor-pointer" onClick={handleWaveformClick}></canvas>
+                        <canvas 
+                            ref={waveformRef} 
+                            className={`w-full h-20 ${isEditorActive ? 'cursor-text' : 'cursor-pointer'}`}
+                            onMouseDown={(e) => isEditorActive ? handleWaveformInteraction(e, 'down') : handleSeek((e.clientX - e.currentTarget.getBoundingClientRect().left) / e.currentTarget.clientWidth * duration)} 
+                            onMouseMove={(e) => handleWaveformInteraction(e, 'move')} 
+                            onMouseUp={(e) => handleWaveformInteraction(e, 'up')} 
+                            onMouseLeave={() => isDraggingRef.current = false}
+                        ></canvas>
                         <div className="flex justify-between text-sm text-text-secondary">
                             <span>{formatTime(currentTime)}</span>
                             <span>{formatTime(duration)}</span>
@@ -778,9 +856,19 @@ const StepFinalPodcast: React.FC<StepFinalPodcastProps> = ({
                                 </select>
                              </div>
                         </div>
+                         {isEditorActive && (
+                            <div className="flex flex-col items-center gap-4 pt-4 border-t border-zinc-700">
+                                {selection && <p className="text-sm text-center text-text-secondary font-mono">Selection: {formatTime(selection.start)} - {formatTime(selection.end)}</p>}
+                                <div className="flex justify-center gap-4">
+                                     <button onClick={() => handleAudioEdit('cut')} disabled={!selection} className="flex items-center gap-2 font-semibold bg-red-900/50 border-2 border-red-500/30 text-red-300 py-2 px-4 rounded-lg hover:bg-red-900 transition disabled:opacity-50 disabled:cursor-not-allowed"><CutIcon/>Cut</button>
+                                    <button onClick={() => handleAudioEdit('trim')} disabled={!selection} className="flex items-center gap-2 font-semibold bg-zinc-800 border-2 border-zinc-700 py-2 px-4 rounded-lg hover:border-gold transition disabled:opacity-50 disabled:cursor-not-allowed">Trim</button>
+                                    <button onClick={handleUndo} disabled={audioHistory.length === 0} className="flex items-center gap-2 font-semibold bg-zinc-800 border-2 border-zinc-700 py-2 px-4 rounded-lg hover:border-gold transition disabled:opacity-50">Undo</button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </Card>
-                <Card title="Actions">
+                <Card title="Actions & Tools">
                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                         <button onClick={handleDownloadAudio} className="w-full bg-transparent border-2 border-zinc-700 font-bold py-4 px-4 rounded-lg hover:border-gold transition flex justify-center items-center gap-2 text-lg">
                            <DownloadIcon /> Download
@@ -789,6 +877,28 @@ const StepFinalPodcast: React.FC<StepFinalPodcastProps> = ({
                             {loadedEpisodeId ? 'Update Episode' : 'Save Episode'}
                         </button>
                     </div>
+                     <div className="space-y-4 pt-6 border-t border-zinc-800">
+                        <h3 className="text-lg font-semibold text-text-primary">Advanced Tools</h3>
+                        <div className="flex justify-between items-center bg-zinc-900/50 p-4 rounded-lg">
+                            <label htmlFor="editor-toggle" className="font-semibold text-text-primary">Audio Editor</label>
+                            <label htmlFor="editor-toggle" className="flex items-center cursor-pointer">
+                                <div className="relative"><input id="editor-toggle" type="checkbox" className="sr-only" checked={isEditorActive} onChange={() => setIsEditorActive(!isEditorActive)} /><div className="block bg-zinc-700 w-12 h-7 rounded-full"></div><div className={`dot absolute left-1 top-1 bg-white w-5 h-5 rounded-full transition-transform ${isEditorActive ? 'translate-x-full bg-gold' : ''}`}></div></div>
+                            </label>
+                        </div>
+                         <div className="space-y-4 pt-4 border-t border-zinc-700/50">
+                             <h4 className="text-md font-semibold text-text-primary">Promotional Content</h4>
+                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <button onClick={() => handleGenerateAd('text')} disabled={!!isLoadingAd} className="bg-zinc-800 hover:bg-zinc-700/80 p-4 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50">
+                                    {isLoadingAd === 'text' ? <LoaderIcon/> : <WandIcon/>} Generate Social Post
+                                </button>
+                                <button onClick={() => handleGenerateAd('script')} disabled={!!isLoadingAd} className="bg-zinc-800 hover:bg-zinc-700/80 p-4 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50">
+                                    {isLoadingAd === 'script' ? <LoaderIcon/> : <AudioIcon/>} Generate Ad Script
+                                </button>
+                             </div>
+                             {adText && <div className="p-4 bg-zinc-900/50 rounded-lg relative"><button onClick={() => copyToClipboard(adText)} className="absolute top-2 right-2 p-2 bg-zinc-700 rounded-full hover:bg-zinc-600"><CopyIcon/></button><p className="whitespace-pre-wrap text-sm text-text-secondary">{adText}</p></div>}
+                             {adScript && <div className="p-4 bg-zinc-900/50 rounded-lg relative"><button onClick={() => copyToClipboard(adScript)} className="absolute top-2 right-2 p-2 bg-zinc-700 rounded-full hover:bg-zinc-600"><CopyIcon/></button><p className="whitespace-pre-wrap text-sm text-text-secondary">{adScript}</p></div>}
+                         </div>
+                     </div>
                     <div className="pt-6 border-t border-zinc-800">
                          <button onClick={handleStartOver} className="w-full bg-primary text-on-primary font-bold py-4 px-4 rounded-lg hover:bg-primary-hover transition flex justify-center items-center gap-2 text-lg shadow-primary-glow">
                             <RestartIcon /> Start Over
@@ -801,7 +911,7 @@ const StepFinalPodcast: React.FC<StepFinalPodcastProps> = ({
                     <h2 className="text-2xl font-serif font-bold text-text-primary flex items-center gap-3"><ScriptIcon />Final Script</h2>
                 </div>
                 <div className="p-8 overflow-y-auto flex-grow">
-                    <ScriptDisplay script={script} activeLineIndex={activeLineIndex} onLineClick={(idx) => handleSeek(scriptTimings[idx].startTime)} />
+                    <ScriptDisplay script={script} activeLineIndex={activeLineIndex} onLineClick={(idx) => handleSeek(scriptTimings[idx].startTime)} areTimingsStale={areTimingsStale}/>
                 </div>
             </div>
             <audio ref={audioRef} className="hidden" />
@@ -875,6 +985,7 @@ const Footer: React.FC<{ onCreatorClick: () => void }> = ({ onCreatorClick }) =>
 };
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('creator');
   const [currentStep, setCurrentStep] = useState(1);
   
   // Step 1
@@ -914,7 +1025,6 @@ export default function App() {
   const [pdfText, setPdfText] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
   const [manualScriptText, setManualScriptText] = useState<string>('');
-  const [combineScripts, setCombineScripts] = useState(false);
   const [customRules, setCustomRules] = useState<string>('');
   const [language, setLanguage] = useState<'English' | 'Afrikaans'>('English');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -929,6 +1039,9 @@ export default function App() {
   // Step 4
   const [audioData, setAudioData] = useState<string | null>(null);
   const [scriptTimings, setScriptTimings] = useState<ScriptTiming[] | null>(null);
+  const [areTimingsStale, setAreTimingsStale] = useState<boolean>(false);
+  const [adText, setAdText] = useState<string | null>(null);
+  const [adScript, setAdScript] = useState<string | null>(null);
 
   // Episode Management
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -954,7 +1067,7 @@ export default function App() {
   
   const resetState = (isNewEpisode: boolean = false) => {
       setPrompt(''); setPdfText(''); setFileName(''); setManualScriptText('');
-      setCombineScripts(false); setCustomRules(''); setLanguage('English');
+      setCustomRules(''); setLanguage('English');
       setSamanthaName('Samantha'); setStewardName('Steward');
       setSamanthaVoice('Kore'); setSamanthaCustomSamples([]);
       setStewardVoice('Fenrir'); setStewardCustomSamples([]);
@@ -963,6 +1076,7 @@ export default function App() {
       setScript(null); setAudioData(null); setScriptTimings(null);
       setBrandedName('Brands by Ai'); setContactDetails(''); setWebsite(''); setSlogan('');
       setError(''); setIsLoadingScript(false); setIsLoadingAudio(false);
+      setAreTimingsStale(false); setAdText(null); setAdScript(null);
       
       if (isNewEpisode) {
         setLoadedEpisodeId(null);
@@ -1037,57 +1151,51 @@ export default function App() {
     }
   };
 
-  const handleGenerateScript = useCallback(async (isCustom: boolean = false) => {
+  const handleGenerateScript = useCallback(async () => {
     if (!episodeTitle.trim() || episodeNumber <= 0) {
         setError('Please provide an Episode Title and Number.'); setCurrentStep(2); return;
     }
-    if (isCustom) {
-        if (!manualScriptText.trim()) { setError("The custom script is empty."); return; }
-    } else if (combineScripts) {
-      if (!((prompt || pdfText) && manualScriptText)) { setError('To combine, provide AI input (topic/PDF) AND a custom script.'); return; }
-    } else if (!prompt && !pdfText) {
-      setError('Please provide a topic or upload a PDF.'); return;
+    if (!prompt && !pdfText && !manualScriptText) {
+      setError('Please provide a topic, upload a PDF, or write a custom script.'); return;
     }
 
     setIsLoadingScript(true); setError(''); setScript(null); setAudioData(null); setScriptTimings(null);
-    if (isCustom && !combineScripts) { setPrompt(''); setPdfText(''); setFileName(''); }
-
+    
     try {
       const branding = { name: brandedName, contact: contactDetails, website, slogan };
       const thirdHost = isThirdHostEnabled && thirdHostName ? { name: thirdHostName, role: thirdHostRole, gender: thirdHostGender } : undefined;
-      const generatedScript = await generateScript( isCustom && !combineScripts ? undefined : prompt, isCustom && !combineScripts ? undefined : pdfText, branding, isCustom || combineScripts ? manualScriptText : undefined, customRules, language, samanthaName || 'Samantha', stewardName || 'Steward', thirdHost, 'South African', episodeTitle, episodeNumber, episodeLength );
+      const generatedScript = await generateScript( prompt, pdfText, branding, manualScriptText, customRules, language, samanthaName || 'Samantha', stewardName || 'Steward', thirdHost, 'South African', episodeTitle, episodeNumber, episodeLength );
       setScript(generatedScript); setCurrentStep(3);
     } catch (e: any) {
       setError(`Failed to generate script: ${e.message}`);
     } finally {
       setIsLoadingScript(false);
     }
-  }, [prompt, pdfText, brandedName, contactDetails, website, slogan, combineScripts, manualScriptText, customRules, language, samanthaName, stewardName, isThirdHostEnabled, thirdHostName, thirdHostRole, thirdHostGender, episodeTitle, episodeNumber, episodeLength]);
+  }, [prompt, pdfText, brandedName, contactDetails, website, slogan, manualScriptText, customRules, language, samanthaName, stewardName, isThirdHostEnabled, thirdHostName, thirdHostRole, thirdHostGender, episodeTitle, episodeNumber, episodeLength]);
   
   const handleGenerateAudio = useCallback(async () => {
     if (!script) { setError('No script available to generate audio.'); return; }
-    setIsLoadingAudio(true); setError(''); setAudioData(null); setScriptTimings(null);
+    setIsLoadingAudio(true); setError(''); setAudioData(null); setScriptTimings(null); setAreTimingsStale(false);
 
     try {
-      const getVoiceConfig = (samples: CustomAudioSample[], prebuiltName: string): VoiceConfig => {
-        if (samples.length > 0) {
-            const pcmChunks = samples.map(s => decode(s.base64));
-            const concatenatedPcm = concatenatePcm(pcmChunks);
-            const base64 = encode(concatenatedPcm);
-            return { type: 'custom', data: base64, mimeType: 'audio/wav' };
-        }
-        return { type: 'prebuilt', name: prebuiltName };
-      };
+        const getVoiceConfig = async (samples: CustomAudioSample[], prebuiltName: string): Promise<VoiceConfig> => {
+            if (samples.length > 0) {
+                const { data, mimeType } = await combineCustomAudioSamples(samples);
+                return { type: 'custom', data, mimeType };
+            }
+            return { type: 'prebuilt', name: prebuiltName };
+        };
 
-      const samanthaVoiceConfig = getVoiceConfig(samanthaCustomSamples, samanthaVoice);
-      const stewardVoiceConfig = getVoiceConfig(stewardCustomSamples, stewardVoice);
-      const thirdHostVoiceConfig = isThirdHostEnabled && thirdHostName ? getVoiceConfig(thirdHostCustomSamples, thirdHostVoice) : undefined;
+      const samanthaVoiceConfig = await getVoiceConfig(samanthaCustomSamples, samanthaVoice);
+      const stewardVoiceConfig = await getVoiceConfig(stewardCustomSamples, stewardVoice);
+      const thirdHostVoiceConfig = isThirdHostEnabled && thirdHostName ? await getVoiceConfig(thirdHostCustomSamples, thirdHostVoice) : undefined;
       
       const thirdHostPayload = isThirdHostEnabled && thirdHostName && thirdHostVoiceConfig ? { name: thirdHostName, voiceConfig: thirdHostVoiceConfig, gender: thirdHostGender } : undefined;
       const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, thirdHostPayload, 'South African');
       setAudioData(audioData); setScriptTimings(timings); setCurrentStep(4);
     } catch (e: any) {
       setError(`Failed to generate audio: ${e.message}`);
+      setCurrentStep(3);
     } finally {
       setIsLoadingAudio(false);
     }
@@ -1153,11 +1261,7 @@ export default function App() {
 
     setIsPreviewing(true); setError('');
     try {
-      const pcmChunks = customSamples.map(s => decode(s.base64));
-      const concatenatedPcm = concatenatePcm(pcmChunks);
-      const base64 = encode(concatenatedPcm);
-      const combinedSample = { data: base64, mimeType: 'audio/wav' };
-
+      const combinedSample = await combineCustomAudioSamples(customSamples);
       const audioBase64 = await previewClonedVoice(combinedSample, language, 'South African');
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       const decodedData = decode(audioBase64);
@@ -1246,8 +1350,9 @@ export default function App() {
     const episodeData: Omit<Episode, 'id' | 'title' | 'episodeNumber'> = {
         samanthaName, stewardName, samanthaVoice, samanthaCustomSamples, stewardVoice, stewardCustomSamples,
         isThirdHostEnabled, thirdHostName, thirdHostRole, thirdHostGender, thirdHostVoice, thirdHostCustomSamples,
-        prompt, pdfText, fileName, manualScriptText, combineScripts, customRules, language, episodeLength,
-        script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound: 'none', audioData
+        prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength,
+        script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound: 'none', audioData,
+        adText, adScript
     };
     if (loadedEpisodeId) {
         setEpisodes(prev => prev.map(ep => ep.id === loadedEpisodeId ? { ...ep, ...episodeData, title: episodeTitle, episodeNumber } : ep));
@@ -1270,27 +1375,27 @@ export default function App() {
     setThirdHostRole(ep.thirdHostRole); setThirdHostGender(ep.thirdHostGender);
     setThirdHostVoice(ep.thirdHostVoice); setThirdHostCustomSamples(ep.thirdHostCustomSamples || []);
     setPrompt(ep.prompt); setPdfText(ep.pdfText); setFileName(ep.fileName);
-    setManualScriptText(ep.manualScriptText); setCombineScripts(ep.combineScripts);
-    setCustomRules(ep.customRules); setLanguage(ep.language); setEpisodeLength(ep.episodeLength || 10);
+    setManualScriptText(ep.manualScriptText); setCustomRules(ep.customRules); setLanguage(ep.language); setEpisodeLength(ep.episodeLength || 10);
     setScript(ep.script); setScriptTimings(ep.scriptTimings); setBrandedName(ep.brandedName);
     setContactDetails(ep.contactDetails); setWebsite(ep.website); setSlogan(ep.slogan);
     setAudioData(ep.audioData); setEpisodeTitle(ep.title); setEpisodeNumber(ep.episodeNumber);
     setLoadedEpisodeId(ep.id);
+    setAdText(ep.adText || null); setAdScript(ep.adScript || null);
     if (ep.audioData) setCurrentStep(4);
     else if (ep.script) setCurrentStep(3);
     else setCurrentStep(2);
     setError('');
   };
 
-  const areContentInputsValid = () => (combineScripts ? ((prompt || pdfText) && manualScriptText) : (prompt || pdfText || manualScriptText));
+  const areContentInputsValid = () => (prompt || pdfText || manualScriptText);
   const areHostsValid = () => samanthaName.trim() !== '' && stewardName.trim() !== '' && (!isThirdHostEnabled || (thirdHostName.trim() !== '' && thirdHostRole.trim() !== ''));
 
-  const renderStepContent = () => {
+  const renderCreatorContent = () => {
     switch(currentStep) {
       case 1: return <StepHosts error={error} setError={setError} samanthaName={samanthaName} setSamanthaName={setSamanthaName} stewardName={stewardName} setStewardName={setStewardName} samanthaVoice={samanthaVoice} setSamanthaVoice={setSamanthaVoice} stewardVoice={stewardVoice} setStewardVoice={setStewardVoice} isThirdHostEnabled={isThirdHostEnabled} setIsThirdHostEnabled={setIsThirdHostEnabled} thirdHostName={thirdHostName} setThirdHostName={setThirdHostName} thirdHostRole={thirdHostRole} setThirdHostRole={setThirdHostRole} thirdHostGender={thirdHostGender} setThirdHostGender={setThirdHostGender} thirdHostVoice={thirdHostVoice} setThirdHostVoice={setThirdHostVoice} isPreviewingSamantha={isPreviewingSamantha} isPreviewingSteward={isPreviewingSteward} isPreviewingThirdHost={isPreviewingThirdHost} handlePreviewVoice={handlePreviewVoice} femaleVoices={femaleVoices} maleVoices={maleVoices} areHostsValid={areHostsValid} setCurrentStep={setCurrentStep} samanthaCustomSamples={samanthaCustomSamples} isPreviewingSamanthaCustom={isPreviewingSamanthaCustom} isRecordingSamantha={isRecordingSamantha} samanthaAudioFileInputRef={samanthaAudioFileInputRef} stewardCustomSamples={stewardCustomSamples} isPreviewingStewardCustom={isPreviewingStewardCustom} isRecordingSteward={isRecordingSteward} stewardAudioFileInputRef={stewardAudioFileInputRef} thirdHostCustomSamples={thirdHostCustomSamples} isPreviewingThirdHostCustom={isPreviewingThirdHostCustom} isRecordingThirdHost={isRecordingThirdHost} thirdHostAudioFileInputRef={thirdHostAudioFileInputRef} handlePreviewCustomVoice={handlePreviewCustomVoice} handleRemoveCustomAudio={handleRemoveCustomAudio} handleToggleRecording={handleToggleRecording} handleAudioFileChange={handleAudioFileChange} isPreviewingQuality={isPreviewingQuality} handlePreviewQuality={handlePreviewQuality} />;
-      case 2: return <StepContent error={error} episodeTitle={episodeTitle} setEpisodeTitle={setEpisodeTitle} episodeNumber={episodeNumber} setEpisodeNumber={setEpisodeNumber} episodeLength={episodeLength} setEpisodeLength={setEpisodeLength} language={language} setLanguage={setLanguage} prompt={prompt} setPrompt={setPrompt} fileName={fileName} fileInputRef={fileInputRef} handleFileChange={handleFileChange} combineScripts={combineScripts} setCombineScripts={setCombineScripts} samanthaName={samanthaName} stewardName={stewardName} manualScriptText={manualScriptText} setManualScriptText={setManualScriptText} customRules={customRules} setCustomRules={setCustomRules} setCurrentStep={setCurrentStep} handleGenerateScript={handleGenerateScript} isLoadingScript={isLoadingScript} areContentInputsValid={areContentInputsValid} pdfText={pdfText} />;
+      case 2: return <StepContent error={error} episodeTitle={episodeTitle} setEpisodeTitle={setEpisodeTitle} episodeNumber={episodeNumber} setEpisodeNumber={setEpisodeNumber} episodeLength={episodeLength} setEpisodeLength={setEpisodeLength} language={language} setLanguage={setLanguage} prompt={prompt} setPrompt={setPrompt} fileName={fileName} fileInputRef={fileInputRef} handleFileChange={handleFileChange} samanthaName={samanthaName} stewardName={stewardName} manualScriptText={manualScriptText} setManualScriptText={setManualScriptText} customRules={customRules} setCustomRules={setCustomRules} setCurrentStep={setCurrentStep} handleGenerateScript={handleGenerateScript} isLoadingScript={isLoadingScript} areContentInputsValid={areContentInputsValid} />;
       case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} />;
-      case 4: return script && audioData && scriptTimings ? <StepFinalPodcast audioData={audioData} script={script} scriptTimings={scriptTimings} handleDownloadAudio={handleDownloadAudio} handleStartOver={handleStartOver} handleSaveOrUpdateEpisode={handleSaveOrUpdateEpisode} loadedEpisodeId={loadedEpisodeId} /> : <div>Loading...</div>;
+      case 4: return script && audioData && scriptTimings ? <StepStudio audioData={audioData} setAudioData={setAudioData} script={script} scriptTimings={scriptTimings} handleDownloadAudio={handleDownloadAudio} handleStartOver={handleStartOver} handleSaveOrUpdateEpisode={handleSaveOrUpdateEpisode} loadedEpisodeId={loadedEpisodeId} areTimingsStale={areTimingsStale} setAreTimingsStale={setAreTimingsStale} adText={adText} setAdText={setAdText} adScript={adScript} setAdScript={setAdScript} episodeTitle={episodeTitle} brandedName={brandedName}/> : <div>Loading...</div>;
       default: return <div />;
     }
   }
@@ -1301,30 +1406,162 @@ export default function App() {
         <header className="relative overflow-hidden pt-16 pb-12 text-center space-y-4">
             <Logo />
             <h1 className="text-5xl font-serif font-black text-text-primary tracking-tight">AI Podcast Studio</h1>
-            <p className="text-lg text-text-secondary">Craft professional podcasts with unparalleled voice realism.</p>
+            <p className="text-lg text-text-secondary">Craft, edit, and produce professional podcasts with AI.</p>
         </header>
-
-        <div className="sticky top-0 z-20 bg-background/80 backdrop-blur-lg py-8 px-4 sm:px-0">
-          <StepIndicator currentStep={currentStep} />
+        
+        {/* Main Tab Navigation */}
+        <div className="w-full mb-12">
+            <h2 className="text-center text-2xl font-serif font-bold text-gold mb-4 tracking-wider">Select Your Workspace</h2>
+            <div className="w-full border-b border-zinc-800 flex justify-center">
+                <nav className="flex items-center gap-4">
+                    <TabButton name="Creator" icon={<VideoIcon />} isActive={activeTab === 'creator'} onClick={() => setActiveTab('creator')} />
+                    <TabButton name="Editor" icon={<CutIcon />} isActive={activeTab === 'editor'} onClick={() => setActiveTab('editor')} />
+                    <TabButton name="About" icon={<InfoIcon />} isActive={activeTab === 'about'} onClick={() => setActiveTab('about')} />
+                </nav>
+            </div>
         </div>
-      
-        <main className="py-12 px-4 sm:px-0">
-          <div className="bg-surface border border-zinc-800 rounded-xl p-6 mb-12 flex flex-col sm:flex-row gap-6 items-center shadow-lg max-w-4xl mx-auto">
-                <select onChange={(e) => handleLoadEpisode(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none" value={loadedEpisodeId || ""} aria-label="Load saved episode">
-                    <option value="" disabled>Load a saved episode...</option>
-                    {episodes.map(ep => (<option key={ep.id} value={ep.id}>Ep {ep.episodeNumber}: {ep.title}</option>))}
-                </select>
-                <button onClick={handleStartOver} className="w-full sm:w-auto bg-primary text-on-primary font-bold py-4 px-8 rounded-lg hover:bg-primary-hover transition flex-shrink-0 shadow-primary-glow">
-                    New Episode
-                </button>
+
+        {activeTab === 'creator' && (
+          <div className="fade-in">
+            <div className="sticky top-0 z-20 bg-background/80 backdrop-blur-lg py-8 px-4 sm:px-0">
+              <StepIndicator currentStep={currentStep} />
+            </div>
+          
+            <main className="py-12 px-4 sm:px-0">
+              <div className="bg-surface border border-zinc-800 rounded-xl p-6 mb-12 flex flex-col sm:flex-row gap-6 items-center shadow-lg max-w-4xl mx-auto">
+                    <select onChange={(e) => handleLoadEpisode(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none" value={loadedEpisodeId || ""} aria-label="Load saved episode">
+                        <option value="" disabled>Load a saved episode...</option>
+                        {episodes.map(ep => (<option key={ep.id} value={ep.id}>Ep {ep.episodeNumber}: {ep.title}</option>))}
+                    </select>
+                    <button onClick={handleStartOver} className="w-full sm:w-auto bg-primary text-on-primary font-bold py-4 px-8 rounded-lg hover:bg-primary-hover transition flex-shrink-0 shadow-primary-glow">
+                        New Episode
+                    </button>
+              </div>
+              <div key={currentStep} className="fade-in">
+                  {renderCreatorContent()}
+              </div>
+            </main>
           </div>
-          <div key={currentStep} className="fade-in">
-              {renderStepContent()}
-          </div>
-        </main>
+        )}
+        
+        {activeTab === 'editor' && <AudioEditorTab />}
+        {activeTab === 'about' && <AboutTab />}
+
       </div>
        <Footer onCreatorClick={() => setIsCreatorPopupVisible(true)} />
       {isCreatorPopupVisible && <CreatorPopup onClose={() => setIsCreatorPopupVisible(false)} />}
     </div>
   );
 }
+
+const TabButton: React.FC<{ name: string; icon: React.ReactNode; isActive: boolean; onClick: () => void; }> = ({ name, icon, isActive, onClick }) => (
+    <button
+        onClick={onClick}
+        className={`flex items-center gap-3 py-4 px-6 font-bold text-lg border-b-4 transition-all duration-300 ${
+            isActive
+                ? 'border-gold text-gold'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+        }`}
+    >
+        {icon}
+        <span>{name}</span>
+    </button>
+);
+
+const AudioEditorTab = () => {
+    const [audioData, setAudioData] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+
+    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setIsLoading(true);
+        setError('');
+        try {
+            const pcmBase64 = await audioBlobToPcmBase64(file);
+            setAudioData(pcmBase64);
+        } catch (e: any) {
+            setError(e.message || 'Failed to process audio file.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    // The Studio component can be reused if we simplify its props for standalone use.
+    // For this implementation, we'll create a simplified version.
+    if (isLoading) {
+        return <div className="text-center py-20"><LoaderIcon /></div>
+    }
+
+    if (error) {
+         return <div className="text-center py-20 text-red-400">{error}</div>
+    }
+
+    if (!audioData) {
+        return (
+            <div className="max-w-2xl mx-auto text-center py-20 fade-in">
+                <Card title="Standalone Audio Editor">
+                    <p className="text-text-secondary">Load an existing podcast or any audio file to make quick edits. The editor works with raw audio data and is perfect for trimming intros, cutting sections, or cleaning up your final track.</p>
+                    <input type="file" accept="audio/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+                    <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full bg-primary text-on-primary font-bold py-4 px-10 rounded-lg hover:bg-primary-hover transition flex justify-center items-center gap-2 text-lg shadow-primary-glow mt-8"
+                    >
+                        <UploadIcon /> Load Audio File
+                    </button>
+                </Card>
+            </div>
+        )
+    }
+
+    // A placeholder for a future, more complex editor component.
+    // For now, we reuse the StepStudio component in a simplified form.
+    return (
+        <div className="fade-in">
+            <p className="text-center text-text-secondary mb-8">Editing audio. More standalone features coming soon.</p>
+            {/* A full implementation would require abstracting StepStudio further */}
+            <div className="opacity-50 pointer-events-none">
+                <StepStudio 
+                    audioData={audioData}
+                    setAudioData={setAudioData}
+                    script={[]}
+                    scriptTimings={[]}
+                    handleDownloadAudio={() => {}}
+                    handleStartOver={() => setAudioData(null)}
+                    handleSaveOrUpdateEpisode={() => {}}
+                    loadedEpisodeId={null}
+                    areTimingsStale={true}
+                    setAreTimingsStale={() => {}}
+                    adText={null} setAdText={() => {}}
+                    adScript={null} setAdScript={() => {}}
+                    episodeTitle="Editing Session"
+                    brandedName=""
+                />
+            </div>
+        </div>
+    );
+};
+
+const AboutTab = () => {
+    return (
+        <div className="max-w-4xl mx-auto py-12 px-4 sm:px-0 fade-in">
+            <Card title="About AI Podcast Studio" icon={<InfoIcon />}>
+                <div className="prose prose-invert prose-lg text-text-secondary space-y-6">
+                    <p>Welcome to the AI Podcast Studio, a comprehensive suite of tools designed to take your podcast from idea to production with the power of generative AI.</p>
+                    <h3 className="text-text-primary font-serif">Key Features:</h3>
+                    <ul>
+                        <li><strong>Hyper-Realistic Voices:</strong> Utilizes advanced text-to-speech models to generate natural, conversational dialogue that sounds truly human, complete with interruptions and realistic pacing.</li>
+                        <li><strong>Voice Cloning:</strong> Provide your own audio samples to create a custom voice clone for any host, ensuring your podcast sounds uniquely yours.</li>
+                        <li><strong>Intelligent Scripting:</strong> Generate a full podcast script from a simple topic, a detailed PDF document, or enhance your own custom script with AI to ensure a natural flow.</li>
+                        <li><strong>Production Studio:</strong> The final step includes an integrated audio editor, allowing you to make precise cuts and trims directly on the generated audio waveform.</li>
+                        <li><strong>Promotional Tools:</strong> Instantly generate compelling social media posts and 30-second ad scripts based on your episode's content to help you market your creation.</li>
+                    </ul>
+                    <p>This application is designed to streamline the entire podcast creation workflow, giving you professional-grade tools in a simple, intuitive interface. Happy podcasting!</p>
+                </div>
+            </Card>
+        </div>
+    )
+};

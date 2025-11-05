@@ -65,14 +65,90 @@
       .bg-grain {
         background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800"><filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23noise)" opacity="0.03"/></svg>');
       }
+      
+      body {
+        position: relative;
+        z-index: 1;
+      }
+
+      #root {
+        position: relative;
+        z-index: 2;
+      }
+
+      #background-effects {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100vw;
+          height: 100vh;
+          overflow: hidden;
+          pointer-events: none;
+          z-index: 0;
+      }
+
+      /* --- Lightning Effect --- */
+      .lightning-flash {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: radial-gradient(ellipse at center, rgba(236, 179, 101, 0.2) 0%, rgba(236, 179, 101, 0) 60%);
+          opacity: 0;
+          animation: lightning-flash 15s ease-out infinite;
+          animation-delay: 4s;
+      }
+
+      @keyframes lightning-flash {
+          0% { opacity: 0; }
+          93% { opacity: 0; }
+          94% { opacity: 0.3; }
+          95% { opacity: 0.1; }
+          96% { opacity: 0.4; }
+          97% { opacity: 0; }
+          100% { opacity: 0; }
+      }
+
+      /* --- Fog Effect --- */
+      .fog-layer {
+          position: absolute;
+          background: radial-gradient(circle, rgba(236, 179, 101, 0.04) 10%, rgba(17, 17, 17, 0) 70%);
+          mix-blend-mode: overlay;
+          opacity: 0.6;
+      }
+
+      .fog-layer.fog-1 {
+          width: 200vw;
+          height: 200vh;
+          top: -50vh;
+          left: -50vw;
+          animation: move-fog 60s linear infinite;
+      }
+
+      .fog-layer.fog-2 {
+          width: 150vw;
+          height: 150vh;
+          bottom: -70vh;
+          right: -60vw;
+          animation: move-fog 80s linear infinite reverse;
+      }
+
+      @keyframes move-fog {
+          0% { transform: translate(0, 0); }
+          25% { transform: translate(40px, -20px); }
+          50% { transform: translate(-30px, 30px); }
+          75% { transform: translate(20px, 50px); }
+          100% { transform: translate(0, 0); }
+      }
+
+      /* Modify pulse-gold for a more ethereal glow */
       @keyframes pulse-gold {
         0%, 100% {
-          box-shadow: 0 0 15px rgba(236, 179, 101, 0.4);
-          border-color: #ECB365;
+          box-shadow: 0 0 20px rgba(236, 179, 101, 0.4), 0 0 40px rgba(236, 179, 101, 0.2);
         }
         50% {
-          box-shadow: 0 0 25px rgba(236, 179, 101, 0.7);
-          border-color: #fcd9a3; /* a lighter gold for the pulse effect */
+          box-shadow: 0 0 35px rgba(236, 179, 101, 0.6), 0 0 60px rgba(236, 179, 101, 0.4);
         }
       }
     </style>
@@ -90,6 +166,11 @@
 </script>
 </head>
   <body class="bg-background text-text-primary bg-grain">
+    <div id="background-effects">
+      <div class="lightning-flash"></div>
+      <div class="fog-layer fog-1"></div>
+      <div class="fog-layer fog-2"></div>
+    </div>
     <div id="root"></div>
     <!-- pdf.js library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>

@@ -2,6 +2,7 @@ export interface ScriptLine {
   speaker: string;
   dialogue: string;
   cue?: string;
+  isInterruption?: boolean;
 }
 
 export type PrebuiltVoice = { type: 'prebuilt'; name: string };
@@ -44,7 +45,6 @@ export interface Episode {
   pdfText: string;
   fileName: string;
   manualScriptText: string;
-  combineScripts: boolean;
   customRules: string;
   language: 'English' | 'Afrikaans';
   episodeLength: number;
@@ -58,4 +58,6 @@ export interface Episode {
   backgroundSound: string;
   // Step 4 state
   audioData: string | null;
+  adText?: string | null;
+  adScript?: string | null;
 }

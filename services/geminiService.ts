@@ -3,11 +3,17 @@ import { ScriptLine, VoiceConfig, ScriptTiming } from '../types';
 import { decode, encode, concatenatePcm, getPcmChunkDuration } from '../utils/audioUtils';
 
 // --- API Key Rotation System ---
+// Prioritizes the main environment key, then falls back to rotational keys.
+// A Set is used to prevent duplicate keys if they are defined in multiple places.
 const apiKeys = [
-  process.env.API_KEY_1,
-  process.env.API_KEY_2,
-  process.env.API_KEY_3,
+  ...new Set([
+    process.env.API_KEY, // Primary key from AI Studio or VITE_API_KEY
+    process.env.API_KEY_1,
+    process.env.API_KEY_2,
+    process.env.API_KEY_3,
+  ]),
 ].filter(Boolean) as string[];
+
 
 /**
  * A wrapper function that handles API key rotation for Gemini API calls.
@@ -20,7 +26,7 @@ const apiKeys = [
  */
 async function withApiKeyRotation<T>(apiCall: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
   if (apiKeys.length === 0) {
-    throw new Error("No API keys configured. Please set at least VITE_API_KEY_1 in your environment.");
+    throw new Error("No API keys configured. Please set VITE_API_KEY in your environment.");
   }
 
   let lastError: any = null;

@@ -1,5 +1,4 @@
-
-
+import { CustomAudioSample } from '../types';
 
 export function encode(bytes: Uint8Array): string {
   let binary = '';
@@ -208,6 +207,89 @@ export async function processAudioForCloning(audioBlob: Blob): Promise<{ base64:
         throw new Error("Failed to process audio file. It might be an unsupported format or corrupt.");
     } finally {
         // Ensure the temporary context is closed to free up resources
+        if (tempAudioContext.state !== 'closed') {
+            await tempAudioContext.close();
+        }
+    }
+}
+
+/**
+ * Correctly combines multiple custom audio samples into a single valid WAV file for voice cloning.
+ * It strips individual WAV headers, concatenates the raw PCM data, and creates a new WAV file.
+ * @param samples An array of CustomAudioSample objects, where `base64` is a full WAV file.
+ * @returns A promise that resolves to an object with the base64 data and mimeType of the combined audio.
+ */
+export async function combineCustomAudioSamples(samples: CustomAudioSample[]): Promise<{ data: string, mimeType: string }> {
+    if (samples.length === 0) {
+        throw new Error("No audio samples provided to combine.");
+    }
+    // If there's only one sample, no need to process, just return it as is.
+    if (samples.length === 1) {
+        return { data: samples[0].base64, mimeType: samples[0].mimeType };
+    }
+
+    // Decode each WAV file and extract the raw PCM data by skipping the 44-byte header.
+    const pcmChunks = samples.map(sample => {
+        const wavBytes = decode(sample.base64);
+        // This is crucial: a standard WAV header is 44 bytes long. We slice it off.
+        return wavBytes.slice(44);
+    });
+    
+    // Concatenate all the raw PCM data chunks into one.
+    const concatenatedPcm = concatenatePcm(pcmChunks);
+    
+    // Create a new valid WAV file Blob from the combined PCM data.
+    // Assumes 24kHz, 1-channel, 16-bit audio, which matches our processing standard.
+    const wavBlob = pcmToWav(concatenatedPcm, 24000, 1, 16);
+    
+    // Convert the new WAV Blob back to a base64 string for the API.
+    const finalBase64 = await blobToBase64(wavBlob);
+
+    return { data: finalBase64, mimeType: 'audio/wav' };
+}
+
+/**
+ * Processes an audio blob from any format, decodes it, resamples to 24kHz mono,
+ * and returns it as a base64 encoded string of raw PCM data for the editor.
+ * @param audioBlob The raw audio blob from a file upload.
+ * @returns A promise that resolves to a base64-encoded raw PCM string.
+ */
+export async function audioBlobToPcmBase64(audioBlob: Blob): Promise<string> {
+    const TARGET_SAMPLE_RATE = 24000;
+    const tempAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    
+    try {
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        const decodedBuffer = await tempAudioContext.decodeAudioData(arrayBuffer);
+        
+        const offlineContext = new OfflineAudioContext(
+            1, // mono
+            Math.ceil(decodedBuffer.duration * TARGET_SAMPLE_RATE),
+            TARGET_SAMPLE_RATE
+        );
+        
+        const source = offlineContext.createBufferSource();
+        source.buffer = decodedBuffer;
+        source.connect(offlineContext.destination);
+        source.start(0);
+        
+        const resampledBuffer = await offlineContext.startRendering();
+        
+        // Convert Float32Array to Int16Array (PCM)
+        const pcmData = resampledBuffer.getChannelData(0);
+        const int16Pcm = new Int16Array(pcmData.length);
+        for (let i = 0; i < pcmData.length; i++) {
+            const sample = Math.max(-1, Math.min(1, pcmData[i]));
+            int16Pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+        }
+        
+        // Encode the raw Int16Array bytes to base64
+        return encode(new Uint8Array(int16Pcm.buffer));
+
+    } catch (error) {
+        console.error("Audio processing failed:", error);
+        throw new Error("Failed to process audio file. It might be an unsupported format or corrupt.");
+    } finally {
         if (tempAudioContext.state !== 'closed') {
             await tempAudioContext.close();
         }

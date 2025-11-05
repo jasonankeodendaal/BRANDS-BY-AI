@@ -1,16 +1,16 @@
 {
-  "short_name": "AI Podcast",
-  "name": "AI Podcast Studio",
-  "description": "An application to generate a podcast script from a topic or a PDF document, and then synthesize the audio for a two-person podcast.",
+  "short_name": "AI Podcast Studio",
+  "name": "AI Podcast Studio & Editor",
+  "description": "An application to create, edit, and produce AI-powered podcasts with hyper-realistic voices, a script creator, audio editor, and promotional tools.",
   "icons": [
     {
-      "src": "/icons/icon-192.png",
+      "src": "https://images.weserv.nl/?url=i.ibb.co%2FzHWF2Hc2%2F90378e8b-4c88-4160-860d-4d510bdded49.png&w=192&h=192&fit=contain&output=png",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any maskable"
     },
     {
-      "src": "/icons/icon-512.png",
+      "src": "https://images.weserv.nl/?url=i.ibb.co%2FzHWF2Hc2%2F90378e8b-4c88-4160-860d-4d510bdded49.png&w=512&h=512&fit=contain&output=png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any maskable"
