@@ -1,18 +1,16 @@
 import React, { useState, useRef, useCallback, PropsWithChildren, useEffect } from 'react';
-import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, ApiKey } from './types';
+import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, ApiKey, GuestHost } from './types';
 import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice, generateQualityPreviewAudio, generateAdText, generateAdScript } from './services/geminiService';
 import { extractTextFromPdf } from './services/pdfService';
 import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence, mixAudio } from './utils/audioUtils';
-// FIX: Added WandIcon to imports
 import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, SettingsIcon, KeyIcon, FolderIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, WorkflowIllustration, VoiceCloningIllustration, AiScriptingIllustration, EditingSuiteIllustration, WandIcon } from './components/Icons';
 import { useFileSystem } from './hooks/useFileSystem';
 import * as apiKeyService from './services/apiKeyService';
 import { BACKGROUND_AUDIO } from './assets/backgroundAudio';
 
 
-type Speaker = 'samantha' | 'steward' | 'thirdHost';
-// FIX: Removed 'settings' as the component is not implemented, simplifying the scope.
-type ActiveTab = 'creator' | 'editor' | 'about';
+type SpeakerId = string;
+type ActiveTab = 'creator' | 'editor' | 'about' | 'settings';
 
 const Logo = () => (
     <div className="relative flex items-center justify-center" aria-label="Brands by Ai">
@@ -76,18 +74,18 @@ const HostEditorCard: React.FC<PropsWithChildren<{
   voice: string;
   setVoice: (voice: string) => void;
   voiceOptions: { name: string; label: string; }[];
-  speakerKey: Speaker;
-  handlePreviewVoice: (speaker: Speaker) => void;
+  hostId: SpeakerId;
+  handlePreviewVoice: (hostId: SpeakerId) => void;
   isPreviewing: boolean;
   customSamples: CustomAudioSample[];
-  handleToggleRecording: (speaker: Speaker) => void;
+  handleToggleRecording: (hostId: SpeakerId) => void;
   isRecording: boolean;
   audioFileInputRef: React.RefObject<HTMLInputElement>;
-  handleAudioFileChange: (event: React.ChangeEvent<HTMLInputElement>, speaker: Speaker) => void;
-  handleRemoveCustomAudio: (speaker: Speaker, index: number) => void;
-  handlePreviewCustomVoice: (speaker: Speaker) => void;
+  handleAudioFileChange: (event: React.ChangeEvent<HTMLInputElement>, hostId: SpeakerId) => void;
+  handleRemoveCustomAudio: (hostId: SpeakerId, index: number) => void;
+  handlePreviewCustomVoice: (hostId: SpeakerId) => void;
   isPreviewingCustom: boolean;
-}>> = ({ name, setName, voice, setVoice, voiceOptions, speakerKey, handlePreviewVoice, isPreviewing, customSamples, handleToggleRecording, isRecording, audioFileInputRef, handleAudioFileChange, handleRemoveCustomAudio, handlePreviewCustomVoice, isPreviewingCustom, children }) => {
+}>> = ({ name, setName, voice, setVoice, voiceOptions, hostId, handlePreviewVoice, isPreviewing, customSamples, handleToggleRecording, isRecording, audioFileInputRef, handleAudioFileChange, handleRemoveCustomAudio, handlePreviewCustomVoice, isPreviewingCustom, children }) => {
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 space-y-6">
       <input type="text" placeholder="Host Name" value={name} onChange={(e) => setName(e.target.value)} className="w-full text-xl bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-3 focus:outline-none focus:border-gold transition font-serif font-bold" />
@@ -98,7 +96,7 @@ const HostEditorCard: React.FC<PropsWithChildren<{
             <select value={voice} onChange={(e) => setVoice(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition disabled:opacity-50 appearance-none" disabled={customSamples.length > 0}>
                 {voiceOptions.map((v, index) => <option key={`${v.name}-${index}`} value={v.name}>{v.label}</option>)}
             </select>
-            <button onClick={() => handlePreviewVoice(speakerKey)} disabled={isPreviewing || customSamples.length > 0} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition flex-shrink-0">
+            <button onClick={() => handlePreviewVoice(hostId)} disabled={isPreviewing || customSamples.length > 0} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition flex-shrink-0">
               {isPreviewing ? <LoaderIcon /> : <PlayCircleIcon />}
             </button>
         </div>
@@ -120,7 +118,7 @@ const HostEditorCard: React.FC<PropsWithChildren<{
                         <span className="truncate text-sm font-semibold flex-1 min-w-0 px-2">{sample.name}</span>
                         <div className="flex items-center gap-2 flex-shrink-0">
                             <button onClick={() => new Audio(sample.url).play()} className="p-2 bg-zinc-700 rounded-full hover:bg-zinc-600 disabled:opacity-50 transition"><PlayCircleIcon /></button>
-                            <button onClick={() => handleRemoveCustomAudio(speakerKey, index)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition"><TrashIcon /></button>
+                            <button onClick={() => handleRemoveCustomAudio(hostId, index)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition"><TrashIcon /></button>
                         </div>
                     </div>
                 ))}
@@ -128,17 +126,17 @@ const HostEditorCard: React.FC<PropsWithChildren<{
         )}
 
         <div className="flex gap-4">
-            <button onClick={() => handleToggleRecording(speakerKey)} disabled={customSamples.length >= 5} className={`w-full flex items-center justify-center gap-3 border-2 border-zinc-700 rounded-lg p-4 transition disabled:opacity-50 disabled:cursor-not-allowed ${isRecording ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent hover:border-gold'}`}>
+            <button onClick={() => handleToggleRecording(hostId)} disabled={customSamples.length >= 5} className={`w-full flex items-center justify-center gap-3 border-2 border-zinc-700 rounded-lg p-4 transition disabled:opacity-50 disabled:cursor-not-allowed ${isRecording ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent hover:border-gold'}`}>
                 <MicIcon /> {isRecording ? 'Stop' : 'Record'}
             </button>
-            <input type="file" accept="audio/*" ref={audioFileInputRef} onChange={(e) => handleAudioFileChange(e, speakerKey)} className="hidden" />
+            <input type="file" accept="audio/*" ref={audioFileInputRef} onChange={(e) => handleAudioFileChange(e, hostId)} className="hidden" />
             <button onClick={() => audioFileInputRef.current?.click()} disabled={customSamples.length >= 5} className="w-full flex items-center justify-center gap-3 bg-transparent border-2 border-zinc-700 rounded-lg p-4 hover:border-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
                 <UploadIcon /> Upload
             </button>
         </div>
         
         {customSamples.length > 0 && (
-             <button onClick={() => handlePreviewCustomVoice(speakerKey)} disabled={isPreviewingCustom} className="w-full flex items-center justify-center gap-3 bg-gold/10 border-2 border-gold rounded-lg p-4 hover:bg-gold/20 text-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
+             <button onClick={() => handlePreviewCustomVoice(hostId)} disabled={isPreviewingCustom} className="w-full flex items-center justify-center gap-3 bg-gold/10 border-2 border-gold rounded-lg p-4 hover:bg-gold/20 text-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
                 {isPreviewingCustom ? <LoaderIcon/> : <VolumeHighIcon/>} Preview Cloned Voice
             </button>
         )}
@@ -159,40 +157,27 @@ interface StepHostsProps {
   setSamanthaVoice: (voice: string) => void;
   stewardVoice: string;
   setStewardVoice: (voice: string) => void;
-  isThirdHostEnabled: boolean;
-  setIsThirdHostEnabled: (enabled: boolean) => void;
-  thirdHostName: string;
-  setThirdHostName: (name: string) => void;
-  thirdHostRole: string;
-  setThirdHostRole: (role: string) => void;
-  thirdHostGender: 'male' | 'female';
-  setThirdHostGender: (gender: 'male' | 'female') => void;
-  thirdHostVoice: string;
-  setThirdHostVoice: (voice: string) => void;
-  isPreviewingSamantha: boolean;
-  isPreviewingSteward: boolean;
-  isPreviewingThirdHost: boolean;
-  handlePreviewVoice: (speaker: Speaker) => void;
+  guestHosts: GuestHost[];
+  onAddGuestHost: () => void;
+  onRemoveGuestHost: (id: string) => void;
+  onUpdateGuestHost: (id: string, field: keyof Omit<GuestHost, 'id' | 'customSamples'>, value: string | 'male' | 'female') => void;
+  previewingHostId: SpeakerId | null;
+  recordingHostId: SpeakerId | null;
+  previewingCustomHostId: SpeakerId | null;
+  handlePreviewVoice: (hostId: SpeakerId) => void;
   femaleVoices: { name: string; label: string; }[];
   maleVoices: { name: string; label: string; }[];
   areHostsValid: () => boolean;
   setCurrentStep: (step: number) => void;
   samanthaCustomSamples: CustomAudioSample[];
-  isPreviewingSamanthaCustom: boolean;
-  isRecordingSamantha: boolean;
-  samanthaAudioFileInputRef: React.RefObject<HTMLInputElement>;
   stewardCustomSamples: CustomAudioSample[];
-  isPreviewingStewardCustom: boolean;
-  isRecordingSteward: boolean;
+  samanthaAudioFileInputRef: React.RefObject<HTMLInputElement>;
   stewardAudioFileInputRef: React.RefObject<HTMLInputElement>;
-  thirdHostCustomSamples: CustomAudioSample[];
-  isPreviewingThirdHostCustom: boolean;
-  isRecordingThirdHost: boolean;
-  thirdHostAudioFileInputRef: React.RefObject<HTMLInputElement>;
-  handlePreviewCustomVoice: (speaker: Speaker) => void;
-  handleRemoveCustomAudio: (speaker: Speaker, index: number) => void;
-  handleToggleRecording: (speaker: Speaker) => void;
-  handleAudioFileChange: (event: React.ChangeEvent<HTMLInputElement>, speaker: Speaker) => void;
+  guestAudioFileInputRefs: React.MutableRefObject<Record<string, React.RefObject<HTMLInputElement>>>;
+  handlePreviewCustomVoice: (hostId: SpeakerId) => void;
+  handleRemoveCustomAudio: (hostId: SpeakerId, index: number) => void;
+  handleToggleRecording: (hostId: SpeakerId) => void;
+  handleAudioFileChange: (event: React.ChangeEvent<HTMLInputElement>, hostId: SpeakerId) => void;
   isPreviewingQuality: boolean;
   handlePreviewQuality: () => void;
 }
@@ -200,15 +185,11 @@ interface StepHostsProps {
 const StepHosts: React.FC<StepHostsProps> = ({
   error, setError, samanthaName, setSamanthaName, stewardName, setStewardName,
   samanthaVoice, setSamanthaVoice, stewardVoice, setStewardVoice,
-  isThirdHostEnabled, setIsThirdHostEnabled, thirdHostName, setThirdHostName,
-  thirdHostRole, setThirdHostRole, thirdHostGender, setThirdHostGender,
-  thirdHostVoice, setThirdHostVoice, isPreviewingSamantha, isPreviewingSteward,
-  isPreviewingThirdHost, handlePreviewVoice, femaleVoices, maleVoices,
+  guestHosts, onAddGuestHost, onRemoveGuestHost, onUpdateGuestHost,
+  previewingHostId, recordingHostId, previewingCustomHostId, handlePreviewVoice, femaleVoices, maleVoices,
   areHostsValid, setCurrentStep, 
-  samanthaCustomSamples, isPreviewingSamanthaCustom, isRecordingSamantha, samanthaAudioFileInputRef,
-  stewardCustomSamples, isPreviewingStewardCustom, isRecordingSteward, stewardAudioFileInputRef,
-  thirdHostCustomSamples, isPreviewingThirdHostCustom, isRecordingThirdHost, thirdHostAudioFileInputRef, 
-  handlePreviewCustomVoice, handleRemoveCustomAudio, handleToggleRecording, handleAudioFileChange,
+  samanthaCustomSamples, stewardCustomSamples, samanthaAudioFileInputRef, stewardAudioFileInputRef,
+  guestAudioFileInputRefs, handlePreviewCustomVoice, handleRemoveCustomAudio, handleToggleRecording, handleAudioFileChange,
   isPreviewingQuality, handlePreviewQuality
 }) => (
   <Card title="I: Define Your Hosts" className="max-w-6xl mx-auto">
@@ -229,71 +210,81 @@ const StepHosts: React.FC<StepHostsProps> = ({
               name={samanthaName} setName={setSamanthaName}
               voice={samanthaVoice} setVoice={setSamanthaVoice}
               voiceOptions={femaleVoices}
-              speakerKey="samantha"
-              handlePreviewVoice={handlePreviewVoice} isPreviewing={isPreviewingSamantha}
+              hostId="samantha"
+              handlePreviewVoice={handlePreviewVoice} isPreviewing={previewingHostId === 'samantha'}
               customSamples={samanthaCustomSamples}
-              handleToggleRecording={handleToggleRecording} isRecording={isRecordingSamantha}
+              handleToggleRecording={handleToggleRecording} isRecording={recordingHostId === 'samantha'}
               audioFileInputRef={samanthaAudioFileInputRef}
               handleAudioFileChange={handleAudioFileChange}
               handleRemoveCustomAudio={handleRemoveCustomAudio}
               handlePreviewCustomVoice={handlePreviewCustomVoice}
-              isPreviewingCustom={isPreviewingSamanthaCustom}
+              isPreviewingCustom={previewingCustomHostId === 'samantha'}
           />
           <HostEditorCard
               name={stewardName} setName={setStewardName}
               voice={stewardVoice} setVoice={setStewardVoice}
               voiceOptions={maleVoices}
-              speakerKey="steward"
-              handlePreviewVoice={handlePreviewVoice} isPreviewing={isPreviewingSteward}
+              hostId="steward"
+              handlePreviewVoice={handlePreviewVoice} isPreviewing={previewingHostId === 'steward'}
               customSamples={stewardCustomSamples}
-              handleToggleRecording={handleToggleRecording} isRecording={isRecordingSteward}
+              handleToggleRecording={handleToggleRecording} isRecording={recordingHostId === 'steward'}
               audioFileInputRef={stewardAudioFileInputRef}
               handleAudioFileChange={handleAudioFileChange}
               handleRemoveCustomAudio={handleRemoveCustomAudio}
               handlePreviewCustomVoice={handlePreviewCustomVoice}
-              isPreviewingCustom={isPreviewingStewardCustom}
+              isPreviewingCustom={previewingCustomHostId === 'steward'}
           />
       </div>
 
       <div className="space-y-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 transition-all duration-300">
-        <div className="flex justify-between items-center">
-          <h3 className="text-xl font-serif font-bold text-text-primary">Add Guest Speaker</h3>
-          <label htmlFor="third-host-toggle" className="flex items-center cursor-pointer">
-            <div className="relative"><input id="third-host-toggle" type="checkbox" className="sr-only" checked={isThirdHostEnabled} onChange={() => setIsThirdHostEnabled(!isThirdHostEnabled)} /><div className="block bg-zinc-700 w-12 h-7 rounded-full"></div><div className={`dot absolute left-1 top-1 bg-white w-5 h-5 rounded-full transition-transform ${isThirdHostEnabled ? 'translate-x-full bg-gold' : ''}`}></div></div>
-          </label>
-        </div>
-        {isThirdHostEnabled && (
-          <div className="space-y-8 pt-6 border-t border-zinc-800 animate-fade-in-scale">
-             <HostEditorCard
-                name={thirdHostName} setName={setThirdHostName}
-                voice={thirdHostVoice} setVoice={setThirdHostVoice}
-                voiceOptions={thirdHostGender === 'female' ? femaleVoices : maleVoices}
-                speakerKey="thirdHost"
-                handlePreviewVoice={handlePreviewVoice} isPreviewing={isPreviewingThirdHost}
-                customSamples={thirdHostCustomSamples}
-                handleToggleRecording={handleToggleRecording} isRecording={isRecordingThirdHost}
-                audioFileInputRef={thirdHostAudioFileInputRef}
-                handleAudioFileChange={handleAudioFileChange}
-                handleRemoveCustomAudio={handleRemoveCustomAudio}
-                handlePreviewCustomVoice={handlePreviewCustomVoice}
-                isPreviewingCustom={isPreviewingThirdHostCustom}
-             >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <div>
-                        <label className="block text-sm font-bold text-text-primary tracking-wider mb-2">GUEST ROLE</label>
-                        <input type="text" placeholder="e.g., Expert" value={thirdHostRole} onChange={(e) => setThirdHostRole(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-primary tracking-wider mb-2">GUEST GENDER</label>
-                        <select value={thirdHostGender} onChange={(e) => setThirdHostGender(e.target.value as any)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
-                            <option value="male">Male</option>
-                            <option value="female">Female</option>
-                        </select>
-                    </div>
-                </div>
-            </HostEditorCard>
+          <h3 className="text-xl font-serif font-bold text-text-primary">Guest Speakers</h3>
+          {guestHosts.map((guest) => {
+              if (!guestAudioFileInputRefs.current[guest.id]) {
+                  guestAudioFileInputRefs.current[guest.id] = React.createRef<HTMLInputElement>();
+              }
+              const audioFileInputRef = guestAudioFileInputRefs.current[guest.id];
+              
+              return (
+                  <div key={guest.id} className="relative pt-8 mt-6 border-t border-zinc-800 animate-fade-in-scale">
+                      <button onClick={() => onRemoveGuestHost(guest.id)} className="absolute top-2 right-2 p-2 text-red-400 hover:bg-red-500/20 rounded-full transition" aria-label={`Remove guest ${guest.name}`}>
+                          <TrashIcon />
+                      </button>
+                      <HostEditorCard
+                          name={guest.name} setName={(name) => onUpdateGuestHost(guest.id, 'name', name)}
+                          voice={guest.voice} setVoice={(voice) => onUpdateGuestHost(guest.id, 'voice', voice)}
+                          voiceOptions={guest.gender === 'female' ? femaleVoices : maleVoices}
+                          hostId={guest.id}
+                          handlePreviewVoice={handlePreviewVoice} isPreviewing={previewingHostId === guest.id}
+                          customSamples={guest.customSamples}
+                          handleToggleRecording={handleToggleRecording} isRecording={recordingHostId === guest.id}
+                          audioFileInputRef={audioFileInputRef}
+                          handleAudioFileChange={handleAudioFileChange}
+                          handleRemoveCustomAudio={handleRemoveCustomAudio}
+                          handlePreviewCustomVoice={handlePreviewCustomVoice}
+                          isPreviewingCustom={previewingCustomHostId === guest.id}
+                      >
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                              <div>
+                                  <label className="block text-sm font-bold text-text-primary tracking-wider mb-2">GUEST ROLE</label>
+                                  <input type="text" placeholder="e.g., Expert" value={guest.role} onChange={(e) => onUpdateGuestHost(guest.id, 'role', e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition" />
+                              </div>
+                              <div>
+                                  <label className="block text-sm font-bold text-text-primary tracking-wider mb-2">GUEST GENDER</label>
+                                  <select value={guest.gender} onChange={(e) => onUpdateGuestHost(guest.id, 'gender', e.target.value as 'male' | 'female')} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
+                                      <option value="male">Male</option>
+                                      <option value="female">Female</option>
+                                  </select>
+                              </div>
+                          </div>
+                      </HostEditorCard>
+                  </div>
+              );
+          })}
+           <div className="pt-6 border-t border-zinc-800 flex justify-center">
+              <button onClick={onAddGuestHost} className="w-full sm:w-auto bg-transparent border-2 border-dashed border-zinc-600 font-bold py-4 px-10 rounded-lg hover:border-gold hover:text-gold text-text-secondary transition flex items-center justify-center gap-2 text-lg">
+                  + Add Guest Speaker
+              </button>
           </div>
-        )}
       </div>
 
       <div className="pt-8 border-t border-zinc-800 flex justify-end">
@@ -1158,7 +1149,6 @@ const AboutTab = () => {
     )
 };
 
-// FIX: Added missing TabButton, AudioEditor, and AudioEditorTab components
 const TabButton: React.FC<{ name: string; icon: React.ReactNode; isActive: boolean; onClick: () => void; }> = ({ name, icon, isActive, onClick }) => (
     <button
         onClick={onClick}
@@ -1591,7 +1581,6 @@ const AudioEditorTab = () => {
     return <AudioEditor initialAudioData={audioData} onStartOver={() => setAudioData(null)} />;
 };
 
-// FIX: Added the main App component to provide the default export
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('creator');
   const [currentStep, setCurrentStep] = useState(1);
@@ -1601,27 +1590,20 @@ export default function App() {
   const [stewardName, setStewardName] = useState('Steward');
   const [samanthaVoice, setSamanthaVoice] = useState<string>('Kore');
   const [samanthaCustomSamples, setSamanthaCustomSamples] = useState<CustomAudioSample[]>([]);
-  const [isRecordingSamantha, setIsRecordingSamantha] = useState<boolean>(false);
-  const [isPreviewingSamantha, setIsPreviewingSamantha] = useState(false);
-  const [isPreviewingSamanthaCustom, setIsPreviewingSamanthaCustom] = useState(false);
   const samanthaAudioFileInputRef = useRef<HTMLInputElement>(null);
   const [stewardVoice, setStewardVoice] = useState<string>('Fenrir');
   const [stewardCustomSamples, setStewardCustomSamples] = useState<CustomAudioSample[]>([]);
-  const [isRecordingSteward, setIsRecordingSteward] = useState<boolean>(false);
-  const [isPreviewingSteward, setIsPreviewingSteward] = useState(false);
-  const [isPreviewingStewardCustom, setIsPreviewingStewardCustom] = useState(false);
   const stewardAudioFileInputRef = useRef<HTMLInputElement>(null);
-  const [isThirdHostEnabled, setIsThirdHostEnabled] = useState(false);
-  const [thirdHostName, setThirdHostName] = useState('');
-  const [thirdHostRole, setThirdHostRole] = useState('');
-  const [thirdHostGender, setThirdHostGender] = useState<'male' | 'female'>('male');
-  const [thirdHostVoice, setThirdHostVoice] = useState<string>('Zephyr');
-  const [thirdHostCustomSamples, setThirdHostCustomSamples] = useState<CustomAudioSample[]>([]);
-  const [isRecordingThirdHost, setIsRecordingThirdHost] = useState<boolean>(false);
-  const [isPreviewingThirdHost, setIsPreviewingThirdHost] = useState(false);
-  const [isPreviewingThirdHostCustom, setIsPreviewingThirdHostCustom] = useState(false);
+  
+  const [guestHosts, setGuestHosts] = useState<GuestHost[]>([]);
+  const guestAudioFileInputRefs = useRef<Record<string, React.RefObject<HTMLInputElement>>>({});
+
+
+  const [previewingHostId, setPreviewingHostId] = useState<SpeakerId | null>(null);
+  const [previewingCustomHostId, setPreviewingCustomHostId] = useState<SpeakerId | null>(null);
+  const [recordingHostId, setRecordingHostId] = useState<SpeakerId | null>(null);
   const [isPreviewingQuality, setIsPreviewingQuality] = useState(false);
-  const thirdHostAudioFileInputRef = useRef<HTMLInputElement>(null);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
@@ -1681,8 +1663,7 @@ export default function App() {
       setSamanthaName('Samantha'); setStewardName('Steward');
       setSamanthaVoice('Kore'); setSamanthaCustomSamples([]);
       setStewardVoice('Fenrir'); setStewardCustomSamples([]);
-      setIsThirdHostEnabled(false); setThirdHostName(''); setThirdHostRole('');
-      setThirdHostGender('male'); setThirdHostVoice('Zephyr'); setThirdHostCustomSamples([]);
+      setGuestHosts([]);
       setScript(null); setAudioData(null); setScriptTimings(null);
       setBrandedName('Brands by Ai'); setContactDetails(''); setWebsite(''); setSlogan('');
       setBackgroundSound('none'); setBackgroundVolume(0.1);
@@ -1726,13 +1707,13 @@ export default function App() {
   useEffect(() => {
     try {
         const storableEpisodes = episodes.map(ep => {
-            const { audioData, samanthaCustomSamples, stewardCustomSamples, thirdHostCustomSamples, ...storableEpisode } = ep;
+            const { audioData, samanthaCustomSamples, stewardCustomSamples, guestHosts, ...storableEpisode } = ep;
             return { 
                 ...storableEpisode, 
                 audioData: null,
                 samanthaCustomSamples: [],
                 stewardCustomSamples: [],
-                thirdHostCustomSamples: []
+                guestHosts: guestHosts.map(g => ({...g, customSamples: []})),
             };
         });
         localStorage.setItem('podcastEpisodes', JSON.stringify(storableEpisodes));
@@ -1740,14 +1721,6 @@ export default function App() {
         console.error("Failed to save episodes to localStorage", error);
     }
   }, [episodes]);
-
-  useEffect(() => {
-    if (thirdHostGender === 'female') {
-      if (!femaleVoices.find(v => v.name === thirdHostVoice)) setThirdHostVoice('Charon');
-    } else {
-      if (!maleVoices.find(v => v.name === thirdHostVoice)) setThirdHostVoice('Zephyr');
-    }
-  }, [thirdHostGender, femaleVoices, maleVoices, thirdHostVoice]);
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1773,15 +1746,15 @@ export default function App() {
     
     try {
       const branding = { name: brandedName, contact: contactDetails, website, slogan };
-      const thirdHost = isThirdHostEnabled && thirdHostName ? { name: thirdHostName, role: thirdHostRole, gender: thirdHostGender } : undefined;
-      const generatedScript = await generateScript( prompt, pdfText, branding, manualScriptText, customRules, language, samanthaName || 'Samantha', stewardName || 'Steward', thirdHost, 'South African', episodeTitle, episodeNumber, episodeLength );
+      const guestsPayload = guestHosts.map(g => ({ name: g.name, role: g.role, gender: g.gender }));
+      const generatedScript = await generateScript( prompt, pdfText, branding, manualScriptText, customRules, language, samanthaName || 'Samantha', stewardName || 'Steward', guestsPayload, 'South African', episodeTitle, episodeNumber, episodeLength );
       setScript(generatedScript); setCurrentStep(3);
     } catch (e: any) {
       setError(`Failed to generate script: ${e.message}`);
     } finally {
       setIsLoadingScript(false);
     }
-  }, [prompt, pdfText, brandedName, contactDetails, website, slogan, manualScriptText, customRules, language, samanthaName, stewardName, isThirdHostEnabled, thirdHostName, thirdHostRole, thirdHostGender, episodeTitle, episodeNumber, episodeLength]);
+  }, [prompt, pdfText, brandedName, contactDetails, website, slogan, manualScriptText, customRules, language, samanthaName, stewardName, guestHosts, episodeTitle, episodeNumber, episodeLength]);
   
   const handleGenerateAudio = useCallback(async () => {
     if (!script) { setError('No script available to generate audio.'); return; }
@@ -1798,10 +1771,12 @@ export default function App() {
 
       const samanthaVoiceConfig = await getVoiceConfig(samanthaCustomSamples, samanthaVoice);
       const stewardVoiceConfig = await getVoiceConfig(stewardCustomSamples, stewardVoice);
-      const thirdHostVoiceConfig = isThirdHostEnabled && thirdHostName ? await getVoiceConfig(thirdHostCustomSamples, thirdHostVoice) : undefined;
+      const guestHostsPayload = await Promise.all(guestHosts.map(async (guest) => ({
+          name: guest.name,
+          voiceConfig: await getVoiceConfig(guest.customSamples, guest.voice)
+      })));
       
-      const thirdHostPayload = isThirdHostEnabled && thirdHostName && thirdHostVoiceConfig ? { name: thirdHostName, voiceConfig: thirdHostVoiceConfig, gender: thirdHostGender } : undefined;
-      const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, thirdHostPayload, 'South African', backgroundSound, backgroundVolume);
+      const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, guestHostsPayload, 'South African', backgroundSound, backgroundVolume);
       setAudioData(audioData); setScriptTimings(timings); setCurrentStep(4);
     } catch (e: any) {
       setError(`Failed to generate audio: ${e.message}`);
@@ -1809,7 +1784,7 @@ export default function App() {
     } finally {
       setIsLoadingAudio(false);
     }
-  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, thirdHostCustomSamples, samanthaName, stewardName, isThirdHostEnabled, thirdHostName, thirdHostVoice, thirdHostGender, backgroundSound, backgroundVolume]);
+  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, guestHosts, samanthaName, stewardName, backgroundSound, backgroundVolume]);
 
   const handleDownloadAudio = () => {
     if (!audioData) return;
@@ -1825,12 +1800,19 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
   
-  const handlePreviewVoice = useCallback(async (speaker: Speaker) => {
-    let voiceName: string, setIsPreviewing: (val: boolean) => void;
-    if (speaker === 'samantha') { voiceName = samanthaVoice; setIsPreviewing = setIsPreviewingSamantha; } 
-    else if (speaker === 'steward') { voiceName = stewardVoice; setIsPreviewing = setIsPreviewingSteward; } 
-    else { voiceName = thirdHostVoice; setIsPreviewing = setIsPreviewingThirdHost; }
-    setIsPreviewing(true); setError('');
+  const handlePreviewVoice = useCallback(async (hostId: SpeakerId) => {
+    let voiceName: string;
+    setPreviewingHostId(hostId);
+    setError('');
+    
+    if (hostId === 'samantha') voiceName = samanthaVoice;
+    else if (hostId === 'steward') voiceName = stewardVoice;
+    else {
+        const guest = guestHosts.find(g => g.id === hostId);
+        if (!guest) { setError('Guest not found'); setPreviewingHostId(null); return; }
+        voiceName = guest.voice;
+    }
+
     try {
       const audioBase64 = await previewVoice(voiceName, language, 'South African');
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
@@ -1840,11 +1822,11 @@ export default function App() {
       source.buffer = buffer;
       source.connect(audioContext.destination);
       source.start();
-      source.onended = () => setIsPreviewing(false);
+      source.onended = () => setPreviewingHostId(null);
     } catch (e: any) {
-      setError(`Failed to preview voice: ${e.message}`); setIsPreviewing(false);
+      setError(`Failed to preview voice: ${e.message}`); setPreviewingHostId(null);
     }
-  }, [samanthaVoice, stewardVoice, thirdHostVoice, language]);
+  }, [samanthaVoice, stewardVoice, guestHosts, language]);
 
   const handlePreviewQuality = async () => {
     setIsPreviewingQuality(true); setError('');
@@ -1861,15 +1843,20 @@ export default function App() {
     }
   };
   
-  const handlePreviewCustomVoice = useCallback(async (speaker: Speaker) => {
-    let customSamples: CustomAudioSample[], setIsPreviewing: (val: boolean) => void;
-    if (speaker === 'samantha') { customSamples = samanthaCustomSamples; setIsPreviewing = setIsPreviewingSamanthaCustom; } 
-    else if (speaker === 'steward') { customSamples = stewardCustomSamples; setIsPreviewing = setIsPreviewingStewardCustom; } 
-    else { customSamples = thirdHostCustomSamples; setIsPreviewing = setIsPreviewingThirdHostCustom; }
+  const handlePreviewCustomVoice = useCallback(async (hostId: SpeakerId) => {
+    let customSamples: CustomAudioSample[];
+    if (hostId === 'samantha') customSamples = samanthaCustomSamples;
+    else if (hostId === 'steward') customSamples = stewardCustomSamples;
+    else {
+      const guest = guestHosts.find(g => g.id === hostId);
+      if (!guest) { setError('Guest not found'); return; }
+      customSamples = guest.customSamples;
+    }
     
     if (customSamples.length === 0) return;
 
-    setIsPreviewing(true); setError('');
+    setPreviewingCustomHostId(hostId);
+    setError('');
     try {
       const combinedSample = await combineCustomAudioSamples(customSamples);
       const audioBase64 = await previewClonedVoice(combinedSample, language, 'South African');
@@ -1878,25 +1865,29 @@ export default function App() {
       const buffer = await customDecodeAudioData(decodedData, audioContext, 24000, 1);
       const source = audioContext.createBufferSource();
       source.buffer = buffer; source.connect(audioContext.destination); source.start();
-      source.onended = () => setIsPreviewing(false);
+      source.onended = () => setPreviewingCustomHostId(null);
     } catch (e: any) {
-      setError(`Failed to preview custom voice: ${e.message}`); setIsPreviewing(false);
+      setError(`Failed to preview custom voice: ${e.message}`); setPreviewingCustomHostId(null);
     }
-  }, [samanthaCustomSamples, stewardCustomSamples, thirdHostCustomSamples, language]);
+  }, [samanthaCustomSamples, stewardCustomSamples, guestHosts, language]);
   
-  const handleToggleRecording = async (speaker: Speaker) => {
-    let isRecording: boolean, setIsRecording: (val: boolean) => void, samples: CustomAudioSample[];
-    if (speaker === 'samantha') { isRecording = isRecordingSamantha; setIsRecording = setIsRecordingSamantha; samples = samanthaCustomSamples } 
-    else if (speaker === 'steward') { isRecording = isRecordingSteward; setIsRecording = setIsRecordingSteward; samples = stewardCustomSamples } 
-    else { isRecording = isRecordingThirdHost; setIsRecording = setIsRecordingThirdHost; samples = thirdHostCustomSamples }
+  const handleToggleRecording = async (hostId: SpeakerId) => {
+    let customSamples: CustomAudioSample[];
+    if (hostId === 'samantha') customSamples = samanthaCustomSamples;
+    else if (hostId === 'steward') customSamples = stewardCustomSamples;
+    else {
+      const guest = guestHosts.find(g => g.id === hostId);
+      if (!guest) { setError('Guest not found'); return; }
+      customSamples = guest.customSamples;
+    }
     
-    if (samples.length >= 5) {
+    if (customSamples.length >= 5) {
       setError("You can add a maximum of 5 audio samples.");
       return;
     }
 
-    if (isRecording) {
-      mediaRecorderRef.current?.stop(); setIsRecording(false);
+    if (recordingHostId === hostId) {
+      mediaRecorderRef.current?.stop(); setRecordingHostId(null);
     } else {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1909,29 +1900,33 @@ export default function App() {
             const { base64, mimeType } = await import('./utils/audioUtils').then(m => m.processAudioForCloning(audioBlob));
             const url = `data:${mimeType};base64,${base64}`;
             const customAudio: CustomAudioSample = { url, base64, mimeType, name: `Recording ${new Date().toLocaleTimeString()}` };
-            if (speaker === 'samantha') setSamanthaCustomSamples(prev => [...prev, customAudio]);
-            else if (speaker === 'steward') setStewardCustomSamples(prev => [...prev, customAudio]);
-            else setThirdHostCustomSamples(prev => [...prev, customAudio]);
+            if (hostId === 'samantha') setSamanthaCustomSamples(prev => [...prev, customAudio]);
+            else if (hostId === 'steward') setStewardCustomSamples(prev => [...prev, customAudio]);
+            else setGuestHosts(prev => prev.map(g => g.id === hostId ? { ...g, customSamples: [...g.customSamples, customAudio] } : g));
           } catch(e: any) {
              setError(e.message || "Failed to process recording.");
           } finally {
             stream.getTracks().forEach(track => track.stop());
           }
         };
-        mediaRecorder.start(); setIsRecording(true);
+        mediaRecorder.start(); setRecordingHostId(hostId);
       } catch (e) { setError("Could not access microphone."); }
     }
   };
   
-  const handleAudioFileChange = async (event: React.ChangeEvent<HTMLInputElement>, speaker: Speaker) => {
+  const handleAudioFileChange = async (event: React.ChangeEvent<HTMLInputElement>, hostId: SpeakerId) => {
     const file = event.target.files?.[0];
     if (file) {
-      let samples: CustomAudioSample[];
-      if (speaker === 'samantha') samples = samanthaCustomSamples;
-      else if (speaker === 'steward') samples = stewardCustomSamples;
-      else samples = thirdHostCustomSamples;
+      let customSamples: CustomAudioSample[];
+      if (hostId === 'samantha') customSamples = samanthaCustomSamples;
+      else if (hostId === 'steward') customSamples = stewardCustomSamples;
+      else {
+        const guest = guestHosts.find(g => g.id === hostId);
+        if (!guest) { setError('Guest not found'); return; }
+        customSamples = guest.customSamples;
+      }
       
-      if (samples.length >= 5) {
+      if (customSamples.length >= 5) {
         setError("You can add a maximum of 5 audio samples.");
         return;
       }
@@ -1941,25 +1936,25 @@ export default function App() {
         const { base64, mimeType } = await import('./utils/audioUtils').then(m => m.processAudioForCloning(file));
         const url = `data:${mimeType};base64,${base64}`;
         const customAudio: CustomAudioSample = { url, base64, mimeType, name: file.name };
-        if (speaker === 'samantha') setSamanthaCustomSamples(prev => [...prev, customAudio]);
-        else if (speaker === 'steward') setStewardCustomSamples(prev => [...prev, customAudio]);
-        else setThirdHostCustomSamples(prev => [...prev, customAudio]);
+        if (hostId === 'samantha') setSamanthaCustomSamples(prev => [...prev, customAudio]);
+        else if (hostId === 'steward') setStewardCustomSamples(prev => [...prev, customAudio]);
+        else setGuestHosts(prev => prev.map(g => g.id === hostId ? { ...g, customSamples: [...g.customSamples, customAudio] } : g));
       } catch (e: any) { setError(e.message || "Failed to read and process audio file."); }
     }
     if (event.target) { event.target.value = ''; }
   };
   
-  const handleRemoveCustomAudio = (speaker: Speaker, index: number) => {
-    if (speaker === 'samantha') setSamanthaCustomSamples(prev => prev.filter((_, i) => i !== index));
-    else if (speaker === 'steward') setStewardCustomSamples(prev => prev.filter((_, i) => i !== index));
-    else setThirdHostCustomSamples(prev => prev.filter((_, i) => i !== index));
+  const handleRemoveCustomAudio = (hostId: SpeakerId, index: number) => {
+    if (hostId === 'samantha') setSamanthaCustomSamples(prev => prev.filter((_, i) => i !== index));
+    else if (hostId === 'steward') setStewardCustomSamples(prev => prev.filter((_, i) => i !== index));
+    else setGuestHosts(prev => prev.map(g => g.id === hostId ? { ...g, customSamples: g.customSamples.filter((_, i) => i !== index) } : g));
   };
 
   const handleSaveOrUpdateEpisode = () => {
     if (!episodeTitle.trim() || episodeNumber <= 0) { setError("Episode Title and Number are required to save."); return; }
     const episodeData: Omit<Episode, 'id' | 'title' | 'episodeNumber'> = {
         samanthaName, stewardName, samanthaVoice, samanthaCustomSamples, stewardVoice, stewardCustomSamples,
-        isThirdHostEnabled, thirdHostName, thirdHostRole, thirdHostGender, thirdHostVoice, thirdHostCustomSamples,
+        guestHosts,
         prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength,
         script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound, backgroundVolume, audioData,
         adText, adScript
@@ -1981,9 +1976,7 @@ export default function App() {
     setSamanthaName(ep.samanthaName); setStewardName(ep.stewardName);
     setSamanthaVoice(ep.samanthaVoice); setSamanthaCustomSamples(ep.samanthaCustomSamples || []);
     setStewardVoice(ep.stewardVoice); setStewardCustomSamples(ep.stewardCustomSamples || []);
-    setIsThirdHostEnabled(ep.isThirdHostEnabled); setThirdHostName(ep.thirdHostName);
-    setThirdHostRole(ep.thirdHostRole); setThirdHostGender(ep.thirdHostGender);
-    setThirdHostVoice(ep.thirdHostVoice); setThirdHostCustomSamples(ep.thirdHostCustomSamples || []);
+    setGuestHosts(ep.guestHosts || []);
     setPrompt(ep.prompt); setPdfText(ep.pdfText); setFileName(ep.fileName);
     setManualScriptText(ep.manualScriptText); setCustomRules(ep.customRules); setLanguage(ep.language); setEpisodeLength(ep.episodeLength || 10);
     setScript(ep.script); setScriptTimings(ep.scriptTimings); setBrandedName(ep.brandedName);
@@ -1998,12 +1991,41 @@ export default function App() {
     setError('');
   };
 
+  const addGuestHost = () => {
+      setGuestHosts(prev => [...prev, {
+          id: `guest_${Date.now()}`,
+          name: '',
+          role: '',
+          gender: 'male',
+          voice: 'Zephyr',
+          customSamples: []
+      }]);
+  };
+  
+  const removeGuestHost = (id: string) => {
+      setGuestHosts(prev => prev.filter(g => g.id !== id));
+  };
+  
+  const updateGuestHost = (id: string, field: keyof Omit<GuestHost, 'id' | 'customSamples'>, value: string | 'male' | 'female') => {
+      setGuestHosts(prev => prev.map(g => {
+          if (g.id === id) {
+              const updatedGuest = { ...g, [field]: value };
+              // Reset voice if gender changes
+              if (field === 'gender') {
+                  updatedGuest.voice = value === 'female' ? 'Kore' : 'Zephyr';
+              }
+              return updatedGuest;
+          }
+          return g;
+      }));
+  };
+
   const areContentInputsValid = () => !!(prompt || pdfText || manualScriptText);
-  const areHostsValid = () => samanthaName.trim() !== '' && stewardName.trim() !== '' && (!isThirdHostEnabled || (thirdHostName.trim() !== '' && thirdHostRole.trim() !== ''));
+  const areHostsValid = () => samanthaName.trim() !== '' && stewardName.trim() !== '' && guestHosts.every(g => g.name.trim() !== '' && g.role.trim() !== '');
 
   const renderCreatorContent = () => {
     switch(currentStep) {
-      case 1: return <StepHosts error={error} setError={setError} samanthaName={samanthaName} setSamanthaName={setSamanthaName} stewardName={stewardName} setStewardName={setStewardName} samanthaVoice={samanthaVoice} setSamanthaVoice={setSamanthaVoice} stewardVoice={stewardVoice} setStewardVoice={setStewardVoice} isThirdHostEnabled={isThirdHostEnabled} setIsThirdHostEnabled={setIsThirdHostEnabled} thirdHostName={thirdHostName} setThirdHostName={setThirdHostName} thirdHostRole={thirdHostRole} setThirdHostRole={setThirdHostRole} thirdHostGender={thirdHostGender} setThirdHostGender={setThirdHostGender} thirdHostVoice={thirdHostVoice} setThirdHostVoice={setThirdHostVoice} isPreviewingSamantha={isPreviewingSamantha} isPreviewingSteward={isPreviewingSteward} isPreviewingThirdHost={isPreviewingThirdHost} handlePreviewVoice={handlePreviewVoice} femaleVoices={femaleVoices} maleVoices={maleVoices} areHostsValid={areHostsValid} setCurrentStep={setCurrentStep} samanthaCustomSamples={samanthaCustomSamples} isPreviewingSamanthaCustom={isPreviewingSamanthaCustom} isRecordingSamantha={isRecordingSamantha} samanthaAudioFileInputRef={samanthaAudioFileInputRef} stewardCustomSamples={stewardCustomSamples} isPreviewingStewardCustom={isPreviewingStewardCustom} isRecordingSteward={isRecordingSteward} stewardAudioFileInputRef={stewardAudioFileInputRef} thirdHostCustomSamples={thirdHostCustomSamples} isPreviewingThirdHostCustom={isPreviewingThirdHostCustom} isRecordingThirdHost={isRecordingThirdHost} thirdHostAudioFileInputRef={thirdHostAudioFileInputRef} handlePreviewCustomVoice={handlePreviewCustomVoice} handleRemoveCustomAudio={handleRemoveCustomAudio} handleToggleRecording={handleToggleRecording} handleAudioFileChange={handleAudioFileChange} isPreviewingQuality={isPreviewingQuality} handlePreviewQuality={handlePreviewQuality} />;
+      case 1: return <StepHosts error={error} setError={setError} samanthaName={samanthaName} setSamanthaName={setSamanthaName} stewardName={stewardName} setStewardName={setStewardName} samanthaVoice={samanthaVoice} setSamanthaVoice={setSamanthaVoice} stewardVoice={stewardVoice} setStewardVoice={setStewardVoice} guestHosts={guestHosts} onAddGuestHost={addGuestHost} onRemoveGuestHost={removeGuestHost} onUpdateGuestHost={updateGuestHost} previewingHostId={previewingHostId} recordingHostId={recordingHostId} previewingCustomHostId={previewingCustomHostId} handlePreviewVoice={handlePreviewVoice} femaleVoices={femaleVoices} maleVoices={maleVoices} areHostsValid={areHostsValid} setCurrentStep={setCurrentStep} samanthaCustomSamples={samanthaCustomSamples} stewardCustomSamples={stewardCustomSamples} samanthaAudioFileInputRef={samanthaAudioFileInputRef} stewardAudioFileInputRef={stewardAudioFileInputRef} guestAudioFileInputRefs={guestAudioFileInputRefs} handlePreviewCustomVoice={handlePreviewCustomVoice} handleRemoveCustomAudio={handleRemoveCustomAudio} handleToggleRecording={handleToggleRecording} handleAudioFileChange={handleAudioFileChange} isPreviewingQuality={isPreviewingQuality} handlePreviewQuality={handlePreviewQuality} />;
       case 2: return <StepContent error={error} episodeTitle={episodeTitle} setEpisodeTitle={setEpisodeTitle} episodeNumber={episodeNumber} setEpisodeNumber={setEpisodeNumber} episodeLength={episodeLength} setEpisodeLength={setEpisodeLength} language={language} setLanguage={setLanguage} prompt={prompt} setPrompt={setPrompt} fileName={fileName} fileInputRef={fileInputRef} handleFileChange={handleFileChange} samanthaName={samanthaName} stewardName={stewardName} manualScriptText={manualScriptText} setManualScriptText={setManualScriptText} customRules={customRules} setCustomRules={setCustomRules} setCurrentStep={setCurrentStep} handleGenerateScript={handleGenerateScript} isLoadingScript={isLoadingScript} areContentInputsValid={areContentInputsValid} />;
       case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} backgroundSound={backgroundSound} setBackgroundSound={setBackgroundSound} backgroundVolume={backgroundVolume} setBackgroundVolume={setBackgroundVolume} />;
       case 4: return script && audioData && scriptTimings ? <StepStudio audioData={audioData} setAudioData={setAudioData} script={script} scriptTimings={scriptTimings} handleDownloadAudio={handleDownloadAudio} handleStartOver={handleStartOver} handleSaveOrUpdateEpisode={handleSaveOrUpdateEpisode} loadedEpisodeId={loadedEpisodeId} areTimingsStale={areTimingsStale} setAreTimingsStale={setAreTimingsStale} adText={adText} setAdText={setAdText} adScript={adScript} setAdScript={setAdScript} episodeTitle={episodeTitle} brandedName={brandedName}/> : <div>Loading...</div>;
