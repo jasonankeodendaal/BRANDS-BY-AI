@@ -1,18 +1,7 @@
 import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
 import { ScriptLine, VoiceConfig, ScriptTiming, GuestHost } from '../types';
 import { decode, encode, concatenatePcm, getPcmChunkDuration } from '../utils/audioUtils';
-
-// --- API Key Rotation System ---
-// Prioritizes the main environment key, then falls back to rotational keys.
-// A Set is used to prevent duplicate keys if they are defined in multiple places.
-const apiKeys = [
-  ...new Set([
-    process.env.API_KEY, // Primary key from AI Studio or VITE_API_KEY
-    process.env.API_KEY_1,
-    process.env.API_KEY_2,
-    process.env.API_KEY_3,
-  ]),
-].filter(Boolean) as string[];
+import { getKeys as getApiKeys } from './apiKeyService';
 
 
 /**
@@ -27,19 +16,16 @@ function getFriendlyErrorMessage(error: any): string {
 
   let message = error.message || String(error);
 
-  // The Gemini SDK often includes details in a `toString()` method that aren't in `message`.
   const errorString = error.toString();
   if (errorString.includes('[GoogleGenerativeAI Error]')) {
-    // Extract the message part after the prefix
     message = errorString.replace('[GoogleGenerativeAI Error]:', '').trim();
   }
   
-  // User-friendly mappings for common technical errors
   if (message.toLowerCase().includes("api key not valid")) {
-    return "Authentication failed: The API key is not valid. Please ensure your key is correct and has the necessary permissions.";
+    return "Authentication failed: An API key is not valid. Please ensure your keys in Settings are correct and have the necessary permissions.";
   }
   if (message.toLowerCase().includes("permission denied")) {
-      return "Permission Denied: The API key is missing necessary permissions for the requested operation. Please check your Google Cloud project settings.";
+      return "Permission Denied: An API key is missing necessary permissions for the requested operation. Please check your Google Cloud project settings.";
   }
   if (message.toLowerCase().includes("model `gemini-2.5-pro` not found")) {
       return "Model Not Found: The 'gemini-2.5-pro' model is unavailable. This may be a temporary issue or a problem with your API key's permissions.";
@@ -60,21 +46,35 @@ function getFriendlyErrorMessage(error: any): string {
 
 /**
  * A wrapper function that handles API key rotation for Gemini API calls.
- * It iterates through the available API keys, retrying the call if a quota-related
- * error is encountered.
+ * It first fetches keys saved by the user in IndexedDB, then combines them
+ * with any keys defined in environment variables. It iterates through the
+ * available keys, retrying the call if a quota-related error is encountered.
  *
  * @param apiCall A function that takes a `GoogleGenAI` instance and performs an API call.
  * @returns The result of the successful API call.
  * @throws An error if all API keys fail or if a non-quota error occurs.
  */
 async function withApiKeyRotation<T>(apiCall: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
-  if (apiKeys.length === 0) {
-    throw new Error("No API keys configured. Please set VITE_API_KEY in your environment.");
+  const storedKeys = await getApiKeys();
+  const storedKeyValues = storedKeys.map(k => k.key);
+  
+  const envKeys = [
+    process.env.API_KEY,
+    process.env.API_KEY_1,
+    process.env.API_KEY_2,
+    process.env.API_KEY_3,
+  ].filter(Boolean) as string[];
+
+  // Combine and de-duplicate keys, prioritizing user-stored keys
+  const uniqueApiKeys = [...new Set([...storedKeyValues, ...envKeys])];
+
+  if (uniqueApiKeys.length === 0) {
+    throw new Error("No API keys configured. Please add a key in the Settings tab or set VITE_API_KEY in your environment.");
   }
 
   let lastError: any = null;
 
-  for (const apiKey of apiKeys) {
+  for (const apiKey of uniqueApiKeys) {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const result = await apiCall(ai);
@@ -87,14 +87,12 @@ async function withApiKeyRotation<T>(apiCall: (ai: GoogleGenAI) => Promise<T>): 
         console.warn(`API key failed due to quota issue. Switching to the next key.`);
         continue;
       } else {
-        // Not a quota error, fail fast with a user-friendly message
         throw new Error(getFriendlyErrorMessage(e));
       }
     }
   }
 
-  // If the loop completes, all keys have failed due to quota issues
-  throw new Error(`All API keys have reached their usage limits. Please try again later. Last error: ${getFriendlyErrorMessage(lastError)}`);
+  throw new Error(`All available API keys have reached their usage limits. Please try again later. Last error: ${getFriendlyErrorMessage(lastError)}`);
 }
 
 

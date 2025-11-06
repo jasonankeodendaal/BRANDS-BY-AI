@@ -2,9 +2,10 @@ import React, { useState, useRef, useCallback, PropsWithChildren, useEffect } fr
 import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, GuestHost, ApiKey } from './types';
 import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice, generateQualityPreviewAudio, generateAdText, generateAdScript } from './services/geminiService';
 import { getKeys, addKey, deleteKey } from './services/apiKeyService';
+import { getEpisodes, setEpisodes, clearEpisodes } from './services/episodeService';
 import { extractTextFromPdf } from './services/pdfService';
 import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence } from './utils/audioUtils';
-import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon, SettingsIcon } from './components/Icons';
+import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon, SettingsIcon, ExportIcon, ImportIcon, WarningIcon } from './components/Icons';
 
 type ActiveTab = 'creator' | 'editor' | 'about' | 'settings';
 
@@ -1033,21 +1034,26 @@ const Footer: React.FC<{ onCreatorClick: () => void }> = ({ onCreatorClick }) =>
 };
 
 const SettingsTab = () => {
+    // API Key State
     const [keys, setKeys] = useState<ApiKey[]>([]);
     const [newKey, setNewKey] = useState('');
     const [newLabel, setNewLabel] = useState('');
-    const [error, setError] = useState('');
-    const [isLoading, setIsLoading] = useState(true);
+    const [apiKeyError, setApiKeyError] = useState('');
+    const [isKeyLoading, setIsKeyLoading] = useState(true);
+
+    // Episode Data State
+    const [episodeDataError, setEpisodeDataError] = useState('');
+    const importFileRef = useRef<HTMLInputElement>(null);
 
     const loadKeys = useCallback(async () => {
-        setIsLoading(true);
+        setIsKeyLoading(true);
         try {
             const storedKeys = await getKeys();
             setKeys(storedKeys);
         } catch (e: any) {
-            setError('Failed to load API keys from the database. ' + e.message);
+            setApiKeyError('Failed to load API keys from the database. ' + e.message);
         } finally {
-            setIsLoading(false);
+            setIsKeyLoading(false);
         }
     }, []);
 
@@ -1058,10 +1064,10 @@ const SettingsTab = () => {
     const handleAddKey = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newKey.trim() || !newLabel.trim()) {
-            setError('Both API Key and Label fields are required.');
+            setApiKeyError('Both API Key and Label fields are required.');
             return;
         }
-        setError('');
+        setApiKeyError('');
         try {
             const keyToAdd: ApiKey = {
                 id: `key_${Date.now()}`,
@@ -1074,19 +1080,77 @@ const SettingsTab = () => {
             setNewLabel('');
             await loadKeys();
         } catch (e: any) {
-            setError('Failed to add the new key. ' + e.message);
+            setApiKeyError('Failed to add the new key. ' + e.message);
         }
     };
 
     const handleDeleteKey = async (keyId: string) => {
-        setError('');
+        setApiKeyError('');
         try {
             await deleteKey(keyId);
             await loadKeys();
         } catch (e: any) {
-            setError('Failed to delete the key. ' + e.message);
+            setApiKeyError('Failed to delete the key. ' + e.message);
         }
     };
+
+    const handleExportEpisodes = async () => {
+        setEpisodeDataError('');
+        try {
+            const episodes = await getEpisodes();
+            const dataStr = JSON.stringify(episodes, null, 2);
+            const dataBlob = new Blob([dataStr], {type: "application/json"});
+            const url = URL.createObjectURL(dataBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `ai-podcast-studio-backup-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (e: any) {
+            setEpisodeDataError('Failed to export episodes. ' + e.message);
+        }
+    };
+
+    const handleImportEpisodes = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setEpisodeDataError('');
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const text = e.target?.result as string;
+                const importedEpisodes: Episode[] = JSON.parse(text);
+                // Basic validation
+                if (!Array.isArray(importedEpisodes) || (importedEpisodes.length > 0 && !importedEpisodes[0].id)) {
+                    throw new Error('Invalid or corrupted backup file format.');
+                }
+                await setEpisodes(importedEpisodes);
+                alert('Episodes imported successfully! The page will now reload.');
+                window.location.reload();
+            } catch (err: any) {
+                setEpisodeDataError('Failed to import file. Make sure it is a valid backup file. ' + err.message);
+            }
+        };
+        reader.readAsText(file);
+        if(event.target) event.target.value = '';
+    };
+
+    const handleClearAllEpisodes = async () => {
+        setEpisodeDataError('');
+        if (window.confirm('Are you sure you want to delete ALL episode data? This action cannot be undone.')) {
+            try {
+                await clearEpisodes();
+                alert('All episode data has been cleared. The page will now reload.');
+                window.location.reload();
+            } catch (e: any) {
+                setEpisodeDataError('Failed to clear episode data. ' + e.message);
+            }
+        }
+    };
+
 
     const maskKey = (key: string) => {
         if (key.length <= 8) return '****';
@@ -1094,12 +1158,12 @@ const SettingsTab = () => {
     };
 
     return (
-        <div className="max-w-4xl mx-auto text-center py-12 fade-in">
+        <div className="max-w-4xl mx-auto py-12 fade-in space-y-12">
             <Card title="API Key Management" icon={<SettingsIcon />}>
                 <p className="text-text-secondary -mt-4">
                     Manage your Gemini API keys here. The application will use these in addition to any keys configured in the environment. Keys are stored securely in your browser's local storage.
                 </p>
-                {error && <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-4"><ErrorIcon /><p className="font-semibold text-red-300">{error}</p></div>}
+                {apiKeyError && <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-4"><ErrorIcon /><p className="font-semibold text-red-300">{apiKeyError}</p></div>}
                 
                 <form onSubmit={handleAddKey} className="space-y-4 text-left p-6 bg-zinc-900/50 border border-zinc-800 rounded-lg">
                     <h3 className="text-lg font-bold text-text-primary">Add New Key</h3>
@@ -1133,11 +1197,11 @@ const SettingsTab = () => {
                 </form>
 
                 <div className="space-y-4 pt-6 border-t border-zinc-800">
-                    <h3 className="text-xl font-bold text-text-primary">Saved Keys</h3>
-                    {isLoading ? (
+                    <h3 className="text-xl font-bold text-text-primary text-left">Saved Keys</h3>
+                    {isKeyLoading ? (
                         <div className="flex justify-center items-center p-8"><LoaderIcon /></div>
                     ) : keys.length === 0 ? (
-                        <p className="text-text-secondary">No API keys saved yet.</p>
+                        <p className="text-text-secondary text-center">No API keys saved yet.</p>
                     ) : (
                         <ul className="space-y-3 text-left">
                             {keys.map(apiKey => (
@@ -1153,6 +1217,32 @@ const SettingsTab = () => {
                             ))}
                         </ul>
                     )}
+                </div>
+            </Card>
+
+            <Card title="Episode Data Management" icon={<InfoIcon />}>
+                <p className="text-text-secondary -mt-4">
+                    Manage all your saved episode data. You can export your projects as a backup, import them from a file, or clear all data to start fresh.
+                </p>
+                {episodeDataError && <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-4"><ErrorIcon /><p className="font-semibold text-red-300">{episodeDataError}</p></div>}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+                    <div className="flex flex-col gap-4">
+                        <button onClick={handleExportEpisodes} className="w-full bg-zinc-800 hover:bg-zinc-700/80 p-4 rounded-lg flex items-center justify-center gap-3 transition">
+                            <ExportIcon /> Export All Episodes
+                        </button>
+                         <input type="file" accept=".json" ref={importFileRef} onChange={handleImportEpisodes} className="hidden" />
+                        <button onClick={() => importFileRef.current?.click()} className="w-full bg-zinc-800 hover:bg-zinc-700/80 p-4 rounded-lg flex items-center justify-center gap-3 transition">
+                            <ImportIcon /> Import Episodes (.json)
+                        </button>
+                    </div>
+                    <div className="p-6 bg-red-900/20 border-2 border-red-500/20 rounded-lg flex flex-col items-center justify-center text-center">
+                        <WarningIcon className="w-10 h-10 text-red-400 mb-2"/>
+                        <h4 className="font-bold text-red-300 mb-2">Danger Zone</h4>
+                        <button onClick={handleClearAllEpisodes} className="w-full bg-red-500/80 hover:bg-red-500 text-on-primary font-bold py-3 px-4 rounded-lg transition flex items-center justify-center gap-2">
+                           <TrashIcon /> Clear All Episodes
+                        </button>
+                    </div>
                 </div>
             </Card>
         </div>
@@ -1212,7 +1302,7 @@ export default function App() {
   const [adScript, setAdScript] = useState<string | null>(null);
 
   // Episode Management
-  const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [episodes, setEpisodesState] = useState<Episode[]>([]);
   const [loadedEpisodeId, setLoadedEpisodeId] = useState<string | null>(null);
 
   // Global & Settings
@@ -1262,52 +1352,36 @@ export default function App() {
   };
   
   useEffect(() => {
-    try {
-        const savedEpisodes = localStorage.getItem('podcastEpisodes');
-        if (savedEpisodes) {
-            const parsed = JSON.parse(savedEpisodes);
-            setEpisodes(parsed);
-            if (parsed.length > 0) {
-                const maxEpNum = Math.max(...parsed.map((e: Episode) => e.episodeNumber));
+    const loadData = async () => {
+        try {
+            const savedEpisodes = await getEpisodes();
+            setEpisodesState(savedEpisodes);
+             if (savedEpisodes.length > 0) {
+                const maxEpNum = Math.max(...savedEpisodes.map((e: Episode) => e.episodeNumber));
                 setEpisodeNumber(maxEpNum + 1);
             }
+        } catch (error) {
+            console.error("Failed to load episodes from DB", error);
+            setError("Could not load saved episodes.");
         }
-    } catch (error) {
-        console.error("Failed to load episodes from localStorage", error);
     }
+    loadData();
   }, []);
 
   useEffect(() => {
-    try {
-        const storableEpisodes = episodes.map(ep => {
-            const { audioData, samanthaCustomSamples, stewardCustomSamples, guestHosts, ...storableEpisode } = ep;
-            const storableGuests = guestHosts.map(g => ({...g, customSamples: []}));
-            return { 
-                ...storableEpisode, 
-                audioData: null,
-                samanthaCustomSamples: [],
-                stewardCustomSamples: [],
-                guestHosts: storableGuests
-            };
+    if (guestHosts.forEach) {
+        guestHosts.forEach(guest => {
+            if (guest.gender === 'female') {
+                if (!femaleVoices.some(v => v.name === guest.voice)) {
+                    handleUpdateGuest(guest.id, 'voice', 'Kore');
+                }
+            } else {
+                if (!maleVoices.some(v => v.name === guest.voice)) {
+                    handleUpdateGuest(guest.id, 'voice', 'Zephyr');
+                }
+            }
         });
-        localStorage.setItem('podcastEpisodes', JSON.stringify(storableEpisodes));
-    } catch (error) {
-        console.error("Failed to save episodes to localStorage", error);
     }
-  }, [episodes]);
-
-  useEffect(() => {
-    guestHosts.forEach(guest => {
-        if (guest.gender === 'female') {
-            if (!femaleVoices.some(v => v.name === guest.voice)) {
-                handleUpdateGuest(guest.id, 'voice', 'Kore');
-            }
-        } else {
-            if (!maleVoices.some(v => v.name === guest.voice)) {
-                handleUpdateGuest(guest.id, 'voice', 'Zephyr');
-            }
-        }
-    });
   }, [guestHosts, femaleVoices, maleVoices]);
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1545,21 +1619,27 @@ export default function App() {
     }
   };
 
-  const handleSaveOrUpdateEpisode = () => {
+  const handleSaveOrUpdateEpisode = async () => {
     if (!episodeTitle.trim() || episodeNumber <= 0) { setError("Episode Title and Number are required to save."); return; }
+    const currentEpisodes = await getEpisodes();
     const episodeData: Omit<Episode, 'id' | 'title' | 'episodeNumber'> = {
         samanthaName, stewardName, samanthaVoice, samanthaCustomSamples, stewardVoice, stewardCustomSamples, guestHosts,
         prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength,
         script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound: 'none', audioData,
         adText, adScript
     };
+
+    let updatedEpisodes;
     if (loadedEpisodeId) {
-        setEpisodes(prev => prev.map(ep => ep.id === loadedEpisodeId ? { ...ep, ...episodeData, title: episodeTitle, episodeNumber } : ep));
+        updatedEpisodes = currentEpisodes.map(ep => ep.id === loadedEpisodeId ? { ...ep, ...episodeData, title: episodeTitle, episodeNumber } : ep);
     } else {
         const newId = `ep_${Date.now()}`;
-        setEpisodes(prev => [...prev, { ...episodeData, id: newId, title: episodeTitle, episodeNumber }]);
+        const newEpisode = { ...episodeData, id: newId, title: episodeTitle, episodeNumber };
+        updatedEpisodes = [...currentEpisodes, newEpisode];
         setLoadedEpisodeId(newId);
     }
+    await setEpisodes(updatedEpisodes);
+    setEpisodesState(updatedEpisodes); // Update local state
     setError('');
   };
   
@@ -1583,6 +1663,19 @@ export default function App() {
     else if (ep.script) setCurrentStep(3);
     else setCurrentStep(1);
     setError('');
+  };
+
+  const handleDeleteEpisode = async (id: string) => {
+    if (!id) return;
+    if(window.confirm('Are you sure you want to delete this episode? This cannot be undone.')) {
+        const currentEpisodes = await getEpisodes();
+        const updatedEpisodes = currentEpisodes.filter(ep => ep.id !== id);
+        await setEpisodes(updatedEpisodes);
+        setEpisodesState(updatedEpisodes);
+        if (loadedEpisodeId === id) {
+            handleStartOver();
+        }
+    }
   };
 
   const areContentInputsValid = () => !!(prompt || pdfText || manualScriptText);
@@ -1624,7 +1717,6 @@ export default function App() {
     }
   }
   
-  // Settings tab is conditionally rendered to avoid errors in environments where it's not supported.
   const isSettingsTabVisible = !!window.indexedDB;
 
   return (
@@ -1636,7 +1728,6 @@ export default function App() {
             <p className="text-lg text-text-secondary">Craft, edit, and produce professional podcasts with AI.</p>
         </header>
         
-        {/* Main Tab Navigation */}
         <div className="w-full mb-12">
             <h2 className="text-center text-2xl font-serif font-bold text-gold mb-4 tracking-wider">Select Your Workspace</h2>
             <div className="w-full border-b border-zinc-800 flex justify-center">
@@ -1657,10 +1748,17 @@ export default function App() {
           
             <main className="py-12 px-4 sm:px-0">
               <div className="bg-surface border border-zinc-800 rounded-xl p-6 mb-12 flex flex-col sm:flex-row gap-6 items-center shadow-lg max-w-4xl mx-auto">
-                    <select onChange={(e) => handleLoadEpisode(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none" value={loadedEpisodeId || ""} aria-label="Load saved episode">
-                        <option value="" disabled>Load a saved episode...</option>
-                        {episodes.map(ep => (<option key={ep.id} value={ep.id}>Ep {ep.episodeNumber}: {ep.title}</option>))}
-                    </select>
+                    <div className="flex-grow w-full relative">
+                        <select onChange={(e) => handleLoadEpisode(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none" value={loadedEpisodeId || ""} aria-label="Load saved episode">
+                            <option value="" disabled>Load a saved episode...</option>
+                            {episodes.map(ep => (<option key={ep.id} value={ep.id}>Ep {ep.episodeNumber}: {ep.title}</option>))}
+                        </select>
+                        {loadedEpisodeId && (
+                             <button onClick={() => handleDeleteEpisode(loadedEpisodeId)} className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-red-400 hover:bg-red-500/20 rounded-full transition" aria-label="Delete selected episode">
+                                <TrashIcon />
+                            </button>
+                        )}
+                    </div>
                     <button onClick={handleStartOver} className="w-full sm:w-auto bg-primary text-on-primary font-bold py-4 px-8 rounded-lg hover:bg-primary-hover transition flex-shrink-0 shadow-primary-glow">
                         New Episode
                     </button>
