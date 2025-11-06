@@ -36,7 +36,6 @@ export async function decodeAudioData(
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  // FIX: Use robust Int16Array constructor with byteOffset and length to prevent RangeError.
   const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.length / 2);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
@@ -304,7 +303,6 @@ export async function audioBlobToPcmBase64(audioBlob: Blob): Promise<string> {
  * @returns A new Uint8Array with the fade applied.
  */
 export function applyFade(pcmData: Uint8Array, type: 'in' | 'out'): Uint8Array {
-    // Create a new Int16Array view on the same buffer, respecting byte offset and length.
     const pcmInt16 = new Int16Array(pcmData.buffer, pcmData.byteOffset, pcmData.length / 2);
     const fadedPcm = new Int16Array(pcmInt16); // Create a copy to modify
     const numSamples = fadedPcm.length;
