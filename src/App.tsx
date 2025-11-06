@@ -2,8 +2,8 @@ import React, { useState, useRef, useCallback, PropsWithChildren, useEffect } fr
 import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, GuestHost, ApiKey } from './types';
 import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice, generateQualityPreviewAudio, generateAdText, generateAdScript } from './services/geminiService';
 import { extractTextFromPdf } from './services/pdfService';
-import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence } from './utils/audioUtils';
-import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, DotsIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon, SettingsIcon } from './components/Icons';
+import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence, applyGain, applyNoiseGate, normalize } from './utils/audioUtils';
+import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, DotsIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon, SettingsIcon, NormalizeIcon, NoiseGateIcon, GainIcon } from './components/Icons';
 import { useFileSystem } from './hooks/useFileSystem';
 import * as apiKeyService from './services/apiKeyService';
 import { BACKGROUND_AUDIO } from './assets/backgroundAudio';
@@ -1647,20 +1647,16 @@ const TabButton: React.FC<{ name: string; icon: React.ReactNode; isActive: boole
 const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: string, onStartOver: () => void }) => {
     const [audioData, setAudioData] = useState<string>(initialAudioData);
     const [audioHistory, setAudioHistory] = useState<string[]>([]);
-
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [volume, setVolume] = useState(1);
     const audioRef = useRef<HTMLAudioElement>(null);
-
     const waveformRef = useRef<HTMLCanvasElement>(null);
     const waveformContainerRef = useRef<HTMLDivElement>(null);
     const [selection, setSelection] = useState<{ start: number, end: number} | null>(null);
-    
     const isDraggingRef = useRef(false);
     const [zoom, setZoom] = useState(1);
-
 
     const formatTime = (time: number) => {
         const minutes = Math.floor(time / 60);
@@ -1679,69 +1675,94 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         }
     }, [audioData]);
 
-    const drawWaveform = useCallback((normalizedData: number[]) => {
+    const drawWaveform = useCallback((pcmData: Int16Array) => {
         const canvas = waveformRef.current;
-        if (!canvas) return;
-        const dpr = window.devicePixelRatio || 1;
-        const parent = waveformContainerRef.current;
-        if (!parent) return;
+        const container = waveformContainerRef.current;
+        if (!canvas || !container) return;
 
-        const rect = parent.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const rect = container.getBoundingClientRect();
         canvas.width = rect.width * dpr;
         canvas.height = rect.height * dpr;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         ctx.scale(dpr, dpr);
-        
-        const width = canvas.width / dpr;
-        const height = canvas.height / dpr;
+
+        const width = rect.width;
+        const height = rect.height;
         const centerY = height / 2;
         
         ctx.clearRect(0, 0, width, height);
 
-        // Draw full waveform in gray
-        ctx.strokeStyle = '#a1a1aa';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, centerY);
-        for(let i = 0; i < normalizedData.length; i++) {
-            const x = (i / normalizedData.length) * width;
-            const y = normalizedData[i] * centerY + centerY;
-            ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-        
-        const progressX = duration > 0 ? (currentTime / duration) * width : 0;
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, 0, progressX, height);
-        ctx.clip();
-        
-        ctx.strokeStyle = '#ECB365';
-        ctx.beginPath();
-        ctx.moveTo(0, centerY);
-        for(let i = 0; i < normalizedData.length; i++) {
-            const x = (i / normalizedData.length) * width;
-            const y = normalizedData[i] * centerY + centerY;
-            ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-        ctx.restore();
+        const samplesPerPixel = Math.floor(pcmData.length / (width * zoom));
+        const barWidth = Math.max(1, width / (pcmData.length / samplesPerPixel));
 
+        const gradient = ctx.createLinearGradient(0, 0, 0, height);
+        gradient.addColorStop(0, '#EC4899'); // Pink/Magenta
+        gradient.addColorStop(0.5, '#8B5CF6'); // Purple
+        gradient.addColorStop(1, '#3B82F6');   // Blue
+
+        const playheadX = duration > 0 ? (currentTime / duration) * width * zoom : 0;
+        const scrollOffset = container.scrollLeft;
+        
+        // Draw full waveform
+        for (let x = 0; x < width * zoom; x += barWidth) {
+            const startIndex = Math.floor(x * samplesPerPixel);
+            let min = 0;
+            let max = 0;
+            for (let j = 0; j < samplesPerPixel; j++) {
+                const sample = pcmData[startIndex + j] / 32768.0;
+                if (sample < min) min = sample;
+                if (sample > max) max = sample;
+            }
+            const barHeight = (max - min) * centerY;
+            ctx.fillStyle = gradient;
+            ctx.fillRect(x, centerY - max * centerY, barWidth, barHeight);
+        }
+        
+        // Draw selection
         if (selection) {
             ctx.fillStyle = 'rgba(225, 29, 72, 0.3)';
-            const startX = (selection.start / duration) * width;
-            const endX = (selection.end / duration) * width;
+            const startX = (selection.start / duration) * width * zoom;
+            const endX = (selection.end / duration) * width * zoom;
             ctx.fillRect(startX, 0, endX - startX, height);
         }
-    }, [currentTime, duration, selection]);
+
+        // Draw playhead
+        if (playheadX >= scrollOffset && playheadX <= scrollOffset + width) {
+            ctx.strokeStyle = '#f4f4f5'; // text-primary
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(playheadX, 0);
+            ctx.lineTo(playheadX, height);
+            ctx.stroke();
+        }
+
+    }, [currentTime, duration, selection, zoom]);
     
+    useEffect(() => {
+        if (!audioData) return;
+        const rawData = decode(audioData);
+        const pcm = new Int16Array(rawData.buffer, rawData.byteOffset, rawData.length / 2);
+        drawWaveform(pcm);
+    }, [audioData, drawWaveform, currentTime, selection, zoom, duration]);
+
     useEffect(() => {
       const audio = audioRef.current;
       if (!audio) return;
       
       const handleLoadedMetadata = () => { if (isFinite(audio.duration)) setDuration(audio.duration); };
-      const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
+      const handleTimeUpdate = () => {
+          setCurrentTime(audio.currentTime);
+          const container = waveformContainerRef.current;
+          if (container && audio.duration > 0) {
+              const playheadX = (audio.currentTime / audio.duration) * container.scrollWidth;
+              // Auto-scroll logic
+              if (playheadX < container.scrollLeft || playheadX > container.scrollLeft + container.clientWidth) {
+                  container.scrollLeft = playheadX - container.clientWidth / 2;
+              }
+          }
+      };
       const handlePlay = () => setIsPlaying(true);
       const handlePause = () => setIsPlaying(false);
 
@@ -1758,91 +1779,33 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
           audio.removeEventListener('pause', handlePause);
           audio.removeEventListener('ended', handlePause);
       };
-    }, [audioRef]);
-
-
-    useEffect(() => {
-        if (!audioData) return;
-        
-        const rawData = decode(audioData);
-        // Use the correct buffer view to avoid potential out-of-bounds access
-        const pcm = new Int16Array(rawData.buffer, rawData.byteOffset, rawData.length / 2);
-        const channelData = new Float32Array(pcm.length);
-        for (let i = 0; i < pcm.length; i++) {
-            channelData[i] = pcm[i] / 32768.0;
-        }
-
-        const canvas = waveformRef.current;
-        if (!canvas) return;
-        const parent = waveformContainerRef.current;
-        if (!parent) return;
-
-        // Dynamic sample count based on visual width to maintain detail
-        const samples = Math.floor(parent.getBoundingClientRect().width * zoom);
-        const blockSize = Math.floor(channelData.length / samples);
-        const filteredData = [];
-        for (let i = 0; i < samples; i++) {
-            let sum = 0;
-            for (let j = 0; j < blockSize; j++) {
-                sum += Math.abs(channelData[blockSize * i + j] || 0);
-            }
-            filteredData.push(sum / blockSize);
-        }
-
-        const multiplier = Math.pow(Math.max(...filteredData, 0.00001), -1);
-        const normalizedData = filteredData.map(n => n * multiplier * 2 - 1);
-        
-        drawWaveform(normalizedData);
-        
-    }, [audioData, drawWaveform, currentTime, selection, zoom, duration]);
-
-    // Resize observer to redraw waveform on container resize
-    useEffect(() => {
-        const container = waveformContainerRef.current;
-        if (!container) return;
-        const resizeObserver = new ResizeObserver(() => {
-            // This forces a redraw by toggling zoom slightly, could be improved but effective
-            setZoom(z => z);
-        });
-        resizeObserver.observe(container);
-        return () => resizeObserver.disconnect();
-    }, [drawWaveform, audioData, currentTime, selection, zoom]);
-
-    const handleWaveformClick = useCallback((clientX: number) => {
-        const container = waveformContainerRef.current;
-        if (!container || duration === 0) return;
-        const rect = container.getBoundingClientRect();
-        const position = (clientX - rect.left) / rect.width;
-        handleSeek(position * duration);
-    }, [duration]);
-    
-    const handleInteractionStart = useCallback((clientX: number) => {
-        isDraggingRef.current = true;
-        const container = waveformContainerRef.current;
-        if (!container || duration === 0) return;
-        const rect = container.getBoundingClientRect();
-        const time = Math.max(0, Math.min(((clientX - rect.left) / rect.width) * duration, duration));
-        setSelection({ start: time, end: time });
-    }, [duration]);
-    
-    const handleInteractionMove = useCallback((clientX: number) => {
-        if (!isDraggingRef.current) return;
-        const container = waveformContainerRef.current;
-        if (!container || duration === 0) return;
-        const rect = container.getBoundingClientRect();
-        const time = Math.max(0, Math.min(((clientX - rect.left) / rect.width) * duration, duration));
-        setSelection(s => s ? { ...s, end: time } : null);
-    }, [duration]);
-
-    const handleInteractionEnd = useCallback(() => {
-        isDraggingRef.current = false;
-        setSelection(s => {
-            if (s && s.start > s.end) {
-                return { start: s.end, end: s.start };
-            }
-            return s;
-        });
     }, []);
+    
+    const handleWaveformInteraction = useCallback((clientX: number, type: 'down' | 'move' | 'up') => {
+        const container = waveformContainerRef.current;
+        if (!container || duration === 0) return;
+
+        const rect = container.getBoundingClientRect();
+        const scrollLeft = container.scrollLeft;
+        const totalWidth = container.scrollWidth;
+        const absoluteX = clientX - rect.left + scrollLeft;
+        
+        const time = Math.max(0, Math.min((absoluteX / totalWidth) * duration, duration));
+
+        if (type === 'down') {
+            isDraggingRef.current = true;
+            setSelection({ start: time, end: time });
+        } else if (type === 'move' && isDraggingRef.current) {
+            setSelection(s => s ? { ...s, end: time } : null);
+        } else if (type === 'up') {
+            isDraggingRef.current = false;
+            setSelection(s => {
+                if (s && s.start > s.end) return { start: s.end, end: s.start };
+                return s;
+            });
+        }
+    }, [duration]);
+    
 
     const togglePlayPause = async () => {
         const audio = audioRef.current;
@@ -1865,8 +1828,21 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         if (audioRef.current) audioRef.current.currentTime = time;
     };
 
-    const handleAudioEdit = (type: 'cut' | 'trim' | 'silence' | 'fadeIn' | 'fadeOut') => {
+    const handleApplyEffect = (type: 'normalize' | 'gain' | 'noiseGate' | 'cut' | 'trim' | 'silence' | 'fadeIn' | 'fadeOut') => {
         if (!selection || !audioData) return;
+        
+        let value: any;
+        if (type === 'gain') {
+            const gainDb = parseFloat(window.prompt('Enter gain in dB (e.g., 3 for louder, -6 for quieter)', '3') || '0');
+            if (isNaN(gainDb)) return;
+            value = Math.pow(10, gainDb / 20); // Convert dB to linear amplitude
+        }
+        if (type === 'noiseGate') {
+            const threshold = parseFloat(window.prompt('Enter noise gate threshold (a value from 0.0 to 1.0)', '0.05') || '0');
+            if (isNaN(threshold) || threshold < 0 || threshold > 1) return;
+            value = threshold;
+        }
+
         setAudioHistory(prev => [...prev, audioData]);
         
         const pcmData = decode(audioData);
@@ -1882,25 +1858,29 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         const selectedPart = pcmData.slice(startByte, endByte);
         const part2 = pcmData.slice(endByte);
 
-        let newData;
+        let modifiedPart;
         switch(type) {
             case 'cut':
-                newData = concatenatePcm([part1, part2]);
-                break;
+                modifiedPart = new Uint8Array(0); break;
             case 'trim':
-                newData = selectedPart;
-                break;
+                setAudioData(encode(selectedPart)); setSelection(null); return;
             case 'silence':
-                const silence = generateSilence(selection.end - selection.start, sampleRate, 16);
-                newData = concatenatePcm([part1, silence, part2]);
-                break;
+                modifiedPart = generateSilence(selection.end - selection.start, sampleRate, 16); break;
             case 'fadeIn':
-                newData = concatenatePcm([part1, applyFade(selectedPart, 'in'), part2]);
-                break;
+                modifiedPart = applyFade(selectedPart, 'in'); break;
             case 'fadeOut':
-                newData = concatenatePcm([part1, applyFade(selectedPart, 'out'), part2]);
-                break;
+                modifiedPart = applyFade(selectedPart, 'out'); break;
+            case 'normalize':
+                modifiedPart = normalize(selectedPart, 0.98); break;
+            case 'gain':
+                modifiedPart = applyGain(selectedPart, value); break;
+            case 'noiseGate':
+                modifiedPart = applyNoiseGate(selectedPart, value); break;
+            default:
+                modifiedPart = selectedPart;
         }
+
+        const newData = concatenatePcm([part1, modifiedPart, part2]);
         setAudioData(encode(newData));
         setSelection(null);
     };
@@ -1928,7 +1908,14 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     };
-    
+
+    const ToolButton: React.FC<{onClick: () => void, disabled: boolean, children: React.ReactNode, title: string}> = ({ onClick, disabled, children, title }) => (
+      <button onClick={onClick} disabled={disabled} title={title} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+        {children}
+        <span className="text-sm font-semibold">{title}</span>
+      </button>
+    );
+
     return (
       <div className="max-w-4xl mx-auto text-center py-12 fade-in">
         <Card title="Audio Editor" icon={<EditIcon />}>
@@ -1942,44 +1929,30 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
             </div>
             
             <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl space-y-4">
-                 <div className="flex items-center gap-4 p-2 bg-zinc-800/50 rounded-lg">
-                    <ZoomOutIcon />
-                    <input 
-                        type="range" 
-                        min="1" 
-                        max="20" 
-                        step="1"
-                        value={zoom} 
-                        onChange={(e) => setZoom(parseFloat(e.target.value))}
-                        className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold"
-                        aria-label="Zoom waveform"
-                    />
-                    <ZoomInIcon />
-                </div>
-                <div 
+                 <div 
                     ref={waveformContainerRef} 
-                    className="w-full h-32 md:h-40 bg-zinc-800/20 rounded-lg overflow-hidden"
-                    style={{ touchAction: 'pan-y' }} // Allow vertical scroll but capture horizontal
-                    onMouseDown={(e) => handleInteractionStart(e.clientX)}
-                    onMouseMove={(e) => handleInteractionMove(e.clientX)}
-                    onMouseUp={handleInteractionEnd}
-                    onMouseLeave={handleInteractionEnd}
-                    onTouchStart={(e) => handleInteractionStart(e.touches[0].clientX)}
-                    onTouchMove={(e) => handleInteractionMove(e.touches[0].clientX)}
-                    onTouchEnd={handleInteractionEnd}
-                    onClick={(e) => !selection && handleWaveformClick(e.clientX)}
+                    className="w-full h-32 md:h-40 bg-zinc-800/20 rounded-lg overflow-x-auto"
+                    onMouseDown={(e) => handleWaveformInteraction(e.clientX, 'down')}
+                    onMouseMove={(e) => handleWaveformInteraction(e.clientX, 'move')}
+                    onMouseUp={() => handleWaveformInteraction(0, 'up')}
+                    onMouseLeave={() => isDraggingRef.current && handleWaveformInteraction(0, 'up')}
                 >
                     <canvas 
                         ref={waveformRef} 
-                        className="w-full h-full cursor-text"
+                        className="h-full cursor-text"
                         style={{ width: `${zoom * 100}%` }}
                     />
+                </div>
+                <div className="flex items-center gap-4 p-2 bg-zinc-800/50 rounded-lg">
+                    <ZoomOutIcon />
+                    <input type="range" min="1" max="50" step="1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" aria-label="Zoom waveform"/>
+                    <ZoomInIcon />
                 </div>
                 <div className="flex justify-between text-sm text-text-secondary font-mono">
                     <span>{formatTime(currentTime)}</span>
                     <span>{formatTime(duration)}</span>
                 </div>
-                <div className="flex items-center justify-center gap-6">
+                 <div className="flex items-center justify-center gap-6 p-4 bg-zinc-800/50 rounded-lg">
                     <button onClick={() => handleSeek(Math.max(0, currentTime - 5))} className="p-4 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><RewindIcon /></button>
                     <button onClick={togglePlayPause} className="p-6 bg-primary text-on-primary rounded-full hover:bg-primary-hover transition transform hover:scale-110 shadow-primary-glow">
                         {isPlaying ? <PauseIcon /> : <PlayIcon />}
@@ -1995,26 +1968,17 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
             <div className="pt-8 mt-8 border-t border-zinc-800">
                 <h3 className="text-xl font-serif font-bold text-text-primary mb-6">Editing Tools</h3>
                 {selection && <p className="text-sm text-center text-text-secondary font-mono mb-4">Selection: {formatTime(selection.start)} to {formatTime(selection.end)} ({formatTime(selection.end - selection.start)})</p>}
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 text-center">
-                    <button onClick={handleUndo} disabled={audioHistory.length === 0} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        <RestartIcon /> <span className="text-sm font-semibold">Undo</span>
-                    </button>
-                    <button onClick={() => handleAudioEdit('cut')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        <CutIcon /> <span className="text-sm font-semibold">Cut</span>
-                    </button>
-                     <button onClick={() => handleAudioEdit('trim')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        <TrimIcon /> <span className="text-sm font-semibold">Trim</span>
-                    </button>
-                    <button onClick={() => handleAudioEdit('silence')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        <SilenceIcon /> <span className="text-sm font-semibold">Silence</span>
-                    </button>
-                    <button onClick={() => handleAudioEdit('fadeIn')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        <FadeInIcon /> <span className="text-sm font-semibold">Fade In</span>
-                    </button>
-                     <button onClick={() => handleAudioEdit('fadeOut')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                        <FadeInIcon className="transform -scale-x-100"/> <span className="text-sm font-semibold">Fade Out</span>
-                    </button>
+                
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 text-center">
+                    <ToolButton onClick={handleUndo} disabled={audioHistory.length === 0} title="Undo"><RestartIcon /></ToolButton>
+                    <ToolButton onClick={() => handleApplyEffect('cut')} disabled={!selection} title="Cut"><CutIcon /></ToolButton>
+                    <ToolButton onClick={() => handleApplyEffect('trim')} disabled={!selection} title="Trim"><TrimIcon /></ToolButton>
+                    <ToolButton onClick={() => handleApplyEffect('silence')} disabled={!selection} title="Silence"><SilenceIcon /></ToolButton>
+                    <ToolButton onClick={() => handleApplyEffect('fadeIn')} disabled={!selection} title="Fade In"><FadeInIcon /></ToolButton>
+                    <ToolButton onClick={() => handleApplyEffect('fadeOut')} disabled={!selection} title="Fade Out"><FadeInIcon className="transform -scale-x-100"/></ToolButton>
+                    <ToolButton onClick={() => handleApplyEffect('normalize')} disabled={!selection} title="Normalize"><NormalizeIcon /></ToolButton>
+                    <ToolButton onClick={() => handleApplyEffect('gain')} disabled={!selection} title="Gain"><GainIcon /></ToolButton>
+                    <ToolButton onClick={() => handleApplyEffect('noiseGate')} disabled={!selection} title="Noise Gate"><NoiseGateIcon /></ToolButton>
                 </div>
             </div>
             <audio ref={audioRef} className="hidden" />

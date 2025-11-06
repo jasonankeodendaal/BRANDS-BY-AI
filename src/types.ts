@@ -1,4 +1,3 @@
-// FIX: Removed self-import of GuestHost which conflicts with the declaration below.
 export interface ScriptLine {
   speaker: string;
   dialogue: string;
@@ -70,7 +69,6 @@ export interface Episode {
 
 export type EffectType = 'volume' | 'noise' | 'speed';
 
-// FIX: Added missing ApiKey interface to resolve import error in apiKeyService.ts
 export interface ApiKey {
   key: string;
   id: string;

@@ -374,6 +374,28 @@ export function applyNoiseGate(pcmData: Uint8Array, threshold: number): Uint8Arr
 }
 
 /**
+ * Normalizes PCM audio data to a target peak level.
+ * @param pcmData Raw PCM data as a Uint8Array.
+ * @param targetPeak The target peak amplitude (0.0 to 1.0).
+ * @returns A new Uint8Array with the audio normalized.
+ */
+export function normalize(pcmData: Uint8Array, targetPeak: number): Uint8Array {
+    const pcmInt16 = new Int16Array(pcmData.buffer, pcmData.byteOffset, pcmData.length / 2);
+    let maxAbs = 0;
+    for (let i = 0; i < pcmInt16.length; i++) {
+        const absSample = Math.abs(pcmInt16[i]);
+        if (absSample > maxAbs) {
+            maxAbs = absSample;
+        }
+    }
+    if (maxAbs === 0) return pcmData; // Avoid division by zero on silent clips
+
+    const gainFactor = (32767 * targetPeak) / maxAbs;
+    return applyGain(pcmData, gainFactor);
+}
+
+
+/**
  * Changes the speed of audio via resampling (note: this also changes the pitch).
  * @param pcmData Raw PCM data as a Uint8Array.
  * @param speedFactor Speed multiplier (e.g., 1.2 for 20% faster, 0.8 for 20% slower).
