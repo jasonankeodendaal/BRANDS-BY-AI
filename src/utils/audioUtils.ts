@@ -402,3 +402,34 @@ export function changeSpeed(pcmData: Uint8Array, speedFactor: number): Uint8Arra
 
     return new Uint8Array(modifiedPcm.buffer);
 }
+
+/**
+ * Mixes a voice track with a looping background track.
+ * @param voicePcm The primary voice audio as raw PCM data.
+ * @param backgroundPcm The background audio as raw PCM data. It will be looped.
+ * @param backgroundVolume The volume multiplier for the background track (0.0 to 1.0).
+ * @returns A new Uint8Array with the mixed audio data.
+ */
+export function mixAudio(voicePcm: Uint8Array, backgroundPcm: Uint8Array, backgroundVolume: number): Uint8Array {
+    const voiceInt16 = new Int16Array(voicePcm.buffer, voicePcm.byteOffset, voicePcm.length / 2);
+    const backgroundInt16 = new Int16Array(backgroundPcm.buffer, backgroundPcm.byteOffset, backgroundPcm.length / 2);
+    
+    const mixedPcm = new Int16Array(voiceInt16.length);
+    const backgroundLength = backgroundInt16.length;
+    
+    const MAX_VAL = 32767;
+    const MIN_VAL = -32768;
+
+    for (let i = 0; i < voiceInt16.length; i++) {
+        const voiceSample = voiceInt16[i];
+        // Loop the background track using the modulo operator
+        const backgroundSample = backgroundInt16[i % backgroundLength] * backgroundVolume;
+        
+        const mixedSample = voiceSample + backgroundSample;
+        
+        // Clip the result to prevent distortion (hard clipping)
+        mixedPcm[i] = Math.max(MIN_VAL, Math.min(MAX_VAL, mixedSample));
+    }
+    
+    return new Uint8Array(mixedPcm.buffer);
+}

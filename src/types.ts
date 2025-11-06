@@ -56,6 +56,7 @@ export interface Episode {
   website: string;
   slogan: string;
   backgroundSound: string;
+  backgroundVolume: number;
   // Step 4 state
   audioData: string | null;
   adText?: string | null;
@@ -63,3 +64,8 @@ export interface Episode {
 }
 
 export type EffectType = 'volume' | 'noise' | 'speed';
+
+export interface ApiKey {
+  key: string;
+  isActive: boolean;
+}

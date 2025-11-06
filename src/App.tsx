@@ -1,20 +1,21 @@
 import React, { useState, useRef, useCallback, PropsWithChildren, useEffect } from 'react';
-import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, EffectType } from './types';
+import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, ApiKey } from './types';
 import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice, generateQualityPreviewAudio, generateAdText, generateAdScript } from './services/geminiService';
 import { extractTextFromPdf } from './services/pdfService';
-import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence, applyGain, applyNoiseGate, changeSpeed } from './utils/audioUtils';
-import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, DotsIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, GainIcon, NoiseGateIcon, SpeedIcon, WorkflowIllustration, VoiceCloningIllustration, AiScriptingIllustration, EditingSuiteIllustration } from './components/Icons';
+import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence, mixAudio } from './utils/audioUtils';
+// FIX: Added WandIcon to imports
+import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, SettingsIcon, KeyIcon, FolderIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, WorkflowIllustration, VoiceCloningIllustration, AiScriptingIllustration, EditingSuiteIllustration, WandIcon } from './components/Icons';
+import { useFileSystem } from './hooks/useFileSystem';
+import * as apiKeyService from './services/apiKeyService';
+import { BACKGROUND_AUDIO } from './assets/backgroundAudio';
+
 
 type Speaker = 'samantha' | 'steward' | 'thirdHost';
+// FIX: Removed 'settings' as the component is not implemented, simplifying the scope.
 type ActiveTab = 'creator' | 'editor' | 'about';
 
 const Logo = () => (
     <div className="relative flex items-center justify-center" aria-label="Brands by Ai">
-        {/* Spotlight Effect */}
-        <div 
-            className="absolute -top-1/4 w-[400px] h-[300px] bg-[radial-gradient(ellipse_at_center,rgba(236,179,101,0.1)_0%,rgba(236,179,101,0)_70%)] blur-3xl opacity-80"
-            aria-hidden="true" 
-        />
         <img 
             src="https://i.ibb.co/zHWF2Hc2/90378e8b-4c88-4160-860d-4d510bdded49.png" 
             alt="Brands by Ai company logo" 
@@ -483,13 +484,60 @@ interface StepScriptAndAudioProps {
   setScript: (script: ScriptLine[]) => void;
   setCurrentStep: (step: number) => void;
   handleGenerateAudio: () => void;
+  backgroundSound: string;
+  setBackgroundSound: (sound: string) => void;
+  backgroundVolume: number;
+  setBackgroundVolume: (volume: number) => void;
 }
 
 const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
   error, isLoadingAudio, brandedName, setBrandedName, contactDetails, setContactDetails, website,
-  setWebsite, slogan, setSlogan, script, setScript, setCurrentStep, handleGenerateAudio
+  setWebsite, slogan, setSlogan, script, setScript, setCurrentStep, handleGenerateAudio,
+  backgroundSound, setBackgroundSound, backgroundVolume, setBackgroundVolume
 }) => {
     const [isEditing, setIsEditing] = useState(false);
+    const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
+    const [isPreviewing, setIsPreviewing] = useState(false);
+
+    const handlePreviewBackground = () => {
+        if (audioPreviewRef.current) {
+            audioPreviewRef.current.pause();
+            audioPreviewRef.current = null;
+            setIsPreviewing(false);
+            return;
+        }
+
+        const track = BACKGROUND_AUDIO[backgroundSound];
+        if (!track) return;
+        
+        const audio = new Audio(`data:audio/wav;base64,${track.data}`);
+        audio.loop = true;
+        audio.volume = backgroundVolume;
+        audio.play();
+        audioPreviewRef.current = audio;
+        setIsPreviewing(true);
+
+        audio.onpause = () => {
+             setIsPreviewing(false);
+             audioPreviewRef.current = null;
+        }
+    };
+
+    useEffect(() => {
+        // Stop preview when component unmounts
+        return () => {
+            if (audioPreviewRef.current) {
+                audioPreviewRef.current.pause();
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        if (audioPreviewRef.current) {
+            audioPreviewRef.current.volume = backgroundVolume;
+        }
+    }, [backgroundVolume]);
+
     if (!script) return null;
 
     return (
@@ -505,13 +553,31 @@ const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
                 ) : (
                     <Card title="III: Finalize & Generate">
                         <div className="space-y-8">
+                          <div>
+                            <label className="block text-md font-bold text-text-primary mb-2">Background Audio</label>
+                            <div className="flex gap-4 items-center">
+                                <select value={backgroundSound} onChange={(e) => setBackgroundSound(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
+                                    <option value="none">None</option>
+                                    {Object.entries(BACKGROUND_AUDIO).map(([key, track]) => (
+                                        <option key={key} value={key}>{track.name}</option>
+                                    ))}
+                                </select>
+                                <button onClick={handlePreviewBackground} disabled={backgroundSound === 'none'} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition flex-shrink-0">
+                                    {isPreviewing ? <PauseIcon /> : <PlayIcon />}
+                                </button>
+                            </div>
+                            {backgroundSound !== 'none' && (
+                                <div className="mt-4 flex items-center gap-3">
+                                    <VolumeMuteIcon />
+                                    <input type="range" min="0" max="0.5" step="0.01" value={backgroundVolume} onChange={(e) => setBackgroundVolume(parseFloat(e.target.value))} className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold"/>
+                                    <VolumeHighIcon />
+                                </div>
+                            )}
+                          </div>
                             <input type="text" placeholder="Branded Name (e.g., Brands by AI)" value={brandedName} onChange={(e) => setBrandedName(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Contact Details (e.g., email)" value={contactDetails} onChange={(e) => setContactDetails(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Website (e.g., yoursite.com)" value={website} onChange={(e) => setWebsite(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Slogan" value={slogan} onChange={(e) => setSlogan(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
-                        </div>
-                         <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg text-center text-sm text-text-secondary">
-                            <p>To enable advanced features like interactive script playback, background audio is not available at this step.</p>
                         </div>
                         <div className="pt-8 border-t border-zinc-800 flex justify-between items-center">
                             <button onClick={() => { setScript([]); setCurrentStep(2); }} className="font-bold py-4 px-10 rounded-lg hover:bg-zinc-800 transition flex items-center gap-2 text-lg">
@@ -538,38 +604,6 @@ const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
         </div>
     );
 };
-
-// Helper function to format time in mm:ss format
-const formatTime = (time: number) => {
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-};
-
-// Helper function to generate timestamp markers for the waveform
-const getTimestampMarkers = (duration: number, zoom: number, width: number): { time: string, left: string }[] => {
-    if (!duration || !width) return [];
-    
-    const visibleDuration = duration / zoom;
-    let interval;
-
-    // Determine interval based on visible duration for readability
-    if (visibleDuration > 120) interval = 30;       // 2 mins+ -> 30s intervals
-    else if (visibleDuration > 60) interval = 15;   // 1 min+  -> 15s intervals
-    else if (visibleDuration > 30) interval = 5;    // 30s+  -> 5s intervals
-    else if (visibleDuration > 10) interval = 2;    // 10s+  -> 2s intervals
-    else interval = 1;                              // < 10s   -> 1s intervals
-
-    const markers: { time: string, left: string }[] = [];
-    for (let t = 0; t <= duration; t += interval) {
-        markers.push({
-            time: formatTime(t),
-            left: `${(t / duration) * 100}%`
-        });
-    }
-    return markers;
-};
-
 
 interface StepStudioProps {
   audioData: string;
@@ -611,18 +645,27 @@ const StepStudio: React.FC<StepStudioProps> = ({
     const [audioHistory, setAudioHistory] = useState<string[]>([]);
     const [isLoadingAd, setIsLoadingAd] = useState<string | null>(null);
     const [zoom, setZoom] = useState(1);
-    const [waveformMarkers, setWaveformMarkers] = useState<{ time: string; left: string; }[]>([]);
     
+    const formatTime = (time: number) => {
+        const minutes = Math.floor(time / 60);
+        const seconds = Math.floor(time % 60);
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    };
+    
+    // Create Blob URL from audio data
     useEffect(() => {
         if (audioData && audioRef.current) {
             const rawData = decode(audioData);
             const wavBlob = pcmToWav(rawData, 24000, 1, 16);
             const url = URL.createObjectURL(wavBlob);
             audioRef.current.src = url;
-            return () => URL.revokeObjectURL(url);
+
+            return () => {
+                URL.revokeObjectURL(url);
+            };
         }
     }, [audioData]);
-    
+
     const drawWaveform = useCallback((normalizedData: number[]) => {
         const canvas = waveformRef.current;
         if (!canvas) return;
@@ -633,81 +676,77 @@ const StepStudio: React.FC<StepStudioProps> = ({
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         ctx.scale(dpr, dpr);
-
+        
         const width = canvas.width / dpr;
         const height = canvas.height / dpr;
         const centerY = height / 2;
-
+        
         ctx.clearRect(0, 0, width, height);
 
-        const barWidth = 2;
-        const gap = 2;
-        const totalBarWidth = barWidth + gap;
-
-        const mainGradient = ctx.createLinearGradient(0, 0, width, 0);
-        mainGradient.addColorStop(0, '#e879f9');
-        mainGradient.addColorStop(0.6, '#60a5fa');
-        mainGradient.addColorStop(1, '#3b82f6');
-
-        const progressGradient = ctx.createLinearGradient(0, 0, width, 0);
-        progressGradient.addColorStop(0, '#fcd34d');
-        progressGradient.addColorStop(1, '#ECB365');
-
-        const drawBars = (gradient: CanvasGradient) => {
-            ctx.fillStyle = gradient;
-            normalizedData.forEach((sample, i) => {
-                const x = i * totalBarWidth;
-                const barHeight = Math.max(1, sample * height);
-                ctx.fillRect(x, centerY - barHeight / 2, barWidth, barHeight);
-            });
-        };
+        // Draw full waveform in gray
+        ctx.strokeStyle = '#a1a1aa';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        for(let i = 0; i < normalizedData.length; i++) {
+            const x = (i / normalizedData.length) * width;
+            const y = normalizedData[i] * centerY + centerY;
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
         
-        drawBars(mainGradient);
-
+        // Draw progress in gold
         const progressX = duration > 0 ? (currentTime / duration) * width : 0;
         ctx.save();
         ctx.beginPath();
         ctx.rect(0, 0, progressX, height);
         ctx.clip();
-        drawBars(progressGradient);
+        
+        ctx.strokeStyle = '#ECB365';
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        for(let i = 0; i < normalizedData.length; i++) {
+            const x = (i / normalizedData.length) * width;
+            const y = normalizedData[i] * centerY + centerY;
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
         ctx.restore();
 
+        // Draw selection if active
         if (isEditorActive && selection) {
-            ctx.fillStyle = 'rgba(225, 29, 72, 0.4)';
+            ctx.fillStyle = 'rgba(225, 29, 72, 0.3)';
             const startX = (selection.start / duration) * width;
             const endX = (selection.end / duration) * width;
             ctx.fillRect(startX, 0, endX - startX, height);
         }
+
     }, [currentTime, duration, isEditorActive, selection]);
 
-
+    // Effect for visualizing audio
     useEffect(() => {
         if (!audioData) return;
         
         const rawData = decode(audioData);
         const pcm = new Int16Array(rawData.buffer, rawData.byteOffset, rawData.length / 2);
-        
-        const width = waveformRef.current?.getBoundingClientRect().width || 0;
-        const totalBarWidth = 4; // barWidth(2) + gap(2)
-        const samples = Math.floor(width / totalBarWidth);
-
-        if (samples <= 0) return;
-
-        const blockSize = Math.floor(pcm.length / samples);
-        const filteredData = [];
-        for (let i = 0; i < samples; i++) {
-            const blockStart = blockSize * i;
-            let blockMax = 0;
-            for (let j = 0; j < blockSize; j++) {
-                const sample = Math.abs(pcm[blockStart + j]);
-                if (sample > blockMax) blockMax = sample;
-            }
-            filteredData.push(blockMax);
+        const channelData = new Float32Array(pcm.length);
+        for (let i = 0; i < pcm.length; i++) {
+            channelData[i] = pcm[i] / 32768.0;
         }
 
-        const maxVal = Math.max(...filteredData);
-        const multiplier = maxVal > 0 ? 1 / maxVal : 0;
-        const normalizedData = filteredData.map(n => n * multiplier);
+        const samples = Math.floor(400 * (isEditorActive ? zoom : 1)); // Increase samples when zooming
+        const blockSize = Math.floor(channelData.length / samples);
+        const filteredData = [];
+        for (let i = 0; i < samples; i++) {
+            let sum = 0;
+            for (let j = 0; j < blockSize; j++) {
+                sum = sum + Math.abs(channelData[blockSize * i + j]);
+            }
+            filteredData.push(sum / blockSize);
+        }
+
+        const multiplier = Math.pow(Math.max(...filteredData), -1) || 1;
+        const normalizedData = filteredData.map(n => n * multiplier * 2 - 1);
         
         drawWaveform(normalizedData);
         
@@ -717,33 +756,30 @@ const StepStudio: React.FC<StepStudioProps> = ({
     useEffect(() => {
         const audio = audioRef.current;
         if (!audio) return;
-        const setAudioMeta = () => { if (isFinite(audio.duration)) setDuration(audio.duration); setCurrentTime(audio.currentTime); };
+        
+        const setAudioData = () => { if (isFinite(audio.duration)) setDuration(audio.duration); setCurrentTime(audio.currentTime); };
         const setAudioTime = () => setCurrentTime(audio.currentTime);
         const handlePlay = () => setIsPlaying(true);
         const handlePause = () => setIsPlaying(false);
-        audio.addEventListener('loadedmetadata', setAudioMeta);
-        audio.addEventListener('durationchange', setAudioMeta);
+
+        audio.addEventListener('loadedmetadata', setAudioData);
+        audio.addEventListener('durationchange', setAudioData);
         audio.addEventListener('timeupdate', setAudioTime);
         audio.addEventListener('play', handlePlay);
         audio.addEventListener('pause', handlePause);
         audio.addEventListener('ended', handlePause);
+
         return () => {
-            audio.removeEventListener('loadedmetadata', setAudioMeta);
-            audio.removeEventListener('durationchange', setAudioMeta);
+            audio.removeEventListener('loadedmetadata', setAudioData);
+            audio.removeEventListener('durationchange', setAudioData);
             audio.removeEventListener('timeupdate', setAudioTime);
             audio.removeEventListener('play', handlePlay);
             audio.removeEventListener('pause', handlePause);
             audio.removeEventListener('ended', handlePause);
         };
     }, []);
-
-    useEffect(() => {
-        const container = waveformContainerRef.current;
-        if(container && duration > 0) {
-            setWaveformMarkers(getTimestampMarkers(duration, zoom, container.clientWidth * zoom));
-        }
-    }, [duration, zoom, audioData]);
     
+    // Find active script line
     useEffect(() => {
         if (areTimingsStale) return;
         const activeLine = scriptTimings.find(
@@ -756,25 +792,40 @@ const StepStudio: React.FC<StepStudioProps> = ({
     const togglePlayPause = async () => {
         if (!audioRef.current) return;
         try {
-            if (audioRef.current.paused) await audioRef.current.play();
-            else audioRef.current.pause();
-        } catch (error: any) { if (error.name !== 'AbortError') console.error("Audio playback error:", error); }
+            if (audioRef.current.paused) {
+                await audioRef.current.play();
+            } else {
+                audioRef.current.pause();
+            }
+        } catch (error: any) {
+             if (error.name !== 'AbortError') {
+                console.error("Error playing/pausing audio:", error);
+            }
+        }
     };
     
     const handleSeek = (time: number) => {
-        if (audioRef.current) audioRef.current.currentTime = time;
+        if (audioRef.current) {
+            audioRef.current.currentTime = time;
+            setCurrentTime(time);
+        }
     };
 
     const handleWaveformInteraction = useCallback((event: React.MouseEvent<HTMLCanvasElement>, type: 'down' | 'move' | 'up') => {
         const container = waveformContainerRef.current;
         if (!container || duration === 0) return;
+
         const rect = container.getBoundingClientRect();
         const scrollLeft = container.scrollLeft;
         const totalWidth = container.scrollWidth;
-        const time = Math.max(0, Math.min(((event.clientX - rect.left + scrollLeft) / totalWidth) * duration, duration));
+        const relativeX = event.clientX - rect.left;
+        const absoluteX = relativeX + scrollLeft;
+        const time = Math.max(0, Math.min((absoluteX / totalWidth) * duration, duration));
 
         if (!isEditorActive) {
-            if (type === 'down') handleSeek(time);
+            if (type === 'down') {
+                handleSeek(time);
+            }
             return;
         }
 
@@ -785,27 +836,34 @@ const StepStudio: React.FC<StepStudioProps> = ({
             setSelection({ ...selection, end: time });
         } else if (type === 'up') {
             isDraggingRef.current = false;
-            if (selection && selection.start > selection.end) setSelection({ start: selection.end, end: selection.start });
+            if (selection && selection.start > selection.end) {
+                setSelection({ start: selection.end, end: selection.start });
+            }
         }
     }, [duration, isEditorActive, selection]);
     
     const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newVolume = parseFloat(e.target.value);
         setVolume(newVolume);
-        if (audioRef.current) audioRef.current.volume = newVolume;
+        if (audioRef.current) {
+            audioRef.current.volume = newVolume;
+        }
     };
     
     const handlePlaybackRateChange = (rate: number) => {
         setPlaybackRate(rate);
-        if (audioRef.current) audioRef.current.playbackRate = rate;
+        if (audioRef.current) {
+            audioRef.current.playbackRate = rate;
+        }
     };
 
     const handleAudioEdit = (type: 'cut' | 'trim') => {
         if (!selection || audioData === null) return;
         setAudioHistory(prev => [...prev, audioData]);
         const pcmData = decode(audioData);
-        const bytesPerSample = 2;
+        const bytesPerSample = 2; // 16-bit
         const sampleRate = 24000;
+        
         let startByte = Math.floor(selection.start * sampleRate * bytesPerSample);
         let endByte = Math.floor(selection.end * sampleRate * bytesPerSample);
         startByte -= startByte % 2;
@@ -813,8 +871,10 @@ const StepStudio: React.FC<StepStudioProps> = ({
 
         let newData;
         if (type === 'cut') {
-            newData = concatenatePcm([pcmData.slice(0, startByte), pcmData.slice(endByte)]);
-        } else {
+            const part1 = pcmData.slice(0, startByte);
+            const part2 = pcmData.slice(endByte);
+            newData = concatenatePcm([part1, part2]);
+        } else { // trim
             newData = pcmData.slice(startByte, endByte);
         }
         setAudioData(encode(newData));
@@ -834,12 +894,23 @@ const StepStudio: React.FC<StepStudioProps> = ({
         if (!script) return;
         setIsLoadingAd(type);
         try {
-            if (type === 'text') setAdText(await generateAdText(script, episodeTitle, brandedName));
-            else setAdScript(await generateAdScript(script, episodeTitle, brandedName));
-        } catch (e) {} finally { setIsLoadingAd(null); }
+            if (type === 'text') {
+                const text = await generateAdText(script, episodeTitle, brandedName);
+                setAdText(text);
+            } else {
+                const ad = await generateAdScript(script, episodeTitle, brandedName);
+                setAdScript(ad);
+            }
+        } catch (e) {
+            // Handle error
+        } finally {
+            setIsLoadingAd(null);
+        }
     };
 
-    const copyToClipboard = (text: string) => navigator.clipboard.writeText(text);
+    const copyToClipboard = (text: string) => {
+        navigator.clipboard.writeText(text);
+    };
     
     return (
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10">
@@ -849,24 +920,31 @@ const StepStudio: React.FC<StepStudioProps> = ({
                          {isEditorActive && (
                             <div className="flex items-center gap-4 p-2 bg-zinc-800/50 rounded-lg">
                                 <ZoomOutIcon />
-                                <input type="range" min="1" max="20" step="1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" aria-label="Zoom waveform" />
+                                <input 
+                                    type="range" 
+                                    min="1" 
+                                    max="20" 
+                                    step="1"
+                                    value={zoom} 
+                                    onChange={(e) => setZoom(parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold"
+                                    aria-label="Zoom waveform"
+                                />
                                 <ZoomInIcon />
                             </div>
                         )}
-                        <div ref={waveformContainerRef} className="w-full overflow-x-auto cursor-pointer">
-                            <div className="relative" style={{ width: `${zoom * 100}%` }}>
-                                <canvas ref={waveformRef} className="h-20 w-full" onMouseDown={(e) => handleWaveformInteraction(e, 'down')} onMouseMove={(e) => handleWaveformInteraction(e, 'move')} onMouseUp={(e) => handleWaveformInteraction(e, 'up')} onMouseLeave={() => isDraggingRef.current = false}></canvas>
-                                <div className="absolute top-full left-0 right-0 h-4 mt-1">
-                                    {waveformMarkers.map(marker => (
-                                        <div key={marker.time} className="absolute -top-1" style={{ left: marker.left }}>
-                                            <div className="w-px h-2 bg-zinc-600" />
-                                            <span className="absolute text-xs text-zinc-500 transform -translate-x-1/2 mt-1 font-mono">{marker.time}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
+                        <div ref={waveformContainerRef} className="w-full overflow-x-auto">
+                            <canvas 
+                                ref={waveformRef} 
+                                className={`h-20 ${isEditorActive ? 'cursor-text' : 'cursor-pointer'}`}
+                                style={{ width: `${isEditorActive ? zoom * 100 : 100}%`, transition: 'width 0.2s ease-out' }}
+                                onMouseDown={(e) => handleWaveformInteraction(e, 'down')} 
+                                onMouseMove={(e) => handleWaveformInteraction(e, 'move')} 
+                                onMouseUp={(e) => handleWaveformInteraction(e, 'up')} 
+                                onMouseLeave={() => isDraggingRef.current = false}
+                            ></canvas>
                         </div>
-                        <div className="flex justify-between text-sm text-text-secondary font-mono pt-4">
+                        <div className="flex justify-between text-sm text-text-secondary">
                             <span>{formatTime(currentTime)}</span>
                             <span>{formatTime(duration)}</span>
                         </div>
@@ -882,7 +960,11 @@ const StepStudio: React.FC<StepStudioProps> = ({
                              <input type="range" min="0" max="1" step="0.01" value={volume} onChange={handleVolumeChange} className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" />
                              <div className="relative">
                                 <select onChange={(e) => handlePlaybackRateChange(parseFloat(e.target.value))} value={playbackRate} className="bg-zinc-800 border-none rounded-md py-1 pl-2 pr-6 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-gold">
-                                    <option value="0.75">0.75x</option><option value="1">1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="2">2x</option>
+                                    <option value="0.75">0.75x</option>
+                                    <option value="1">1x</option>
+                                    <option value="1.25">1.25x</option>
+                                    <option value="1.5">1.5x</option>
+                                    <option value="2">2x</option>
                                 </select>
                              </div>
                         </div>
@@ -1014,6 +1096,502 @@ const Footer: React.FC<{ onCreatorClick: () => void }> = ({ onCreatorClick }) =>
     );
 };
 
+const AboutTab = () => {
+    return (
+        <div className="max-w-4xl mx-auto py-12 px-4 sm:px-0 fade-in">
+            <Card title="About AI Podcast Studio" icon={<InfoIcon />}>
+                <div className="prose prose-invert prose-lg text-text-secondary space-y-8">
+                    <p className="text-xl">
+                        Welcome to the <span className="text-gold font-bold">AI Podcast Studio</span>, a comprehensive suite of tools designed to take your podcast from a simple idea to a fully produced episode, all with the power of cutting-edge generative AI.
+                    </p>
+
+                    <div className="border-t border-zinc-700 pt-6">
+                        <h3 className="text-2xl text-text-primary font-serif mb-4">How It Works: A Step-by-Step Guide</h3>
+                        <p>The studio guides you through a simple, four-step process:</p>
+                        <ol className="list-decimal list-inside space-y-2">
+                            <li><strong>I: Define Your Hosts:</strong> Choose from hyper-realistic pre-built voices or clone your own by providing short audio samples. This step sets the personality of your show.</li>
+                            <li><strong>II: Content & AI Rules:</strong> This is where your story begins. Provide a topic, upload a PDF for context, or even paste in a draft script. You can add custom rules to guide the AI's writing style.</li>
+                            <li><strong>III: Finalize & Generate:</strong> Review the AI-generated script. You can edit the dialogue to perfection before moving on to the main event: audio generation.</li>
+                            <li><strong>IV: Production Studio:</strong> Listen to your fully generated podcast! Use the built-in editor to make final touches, then download your episode or generate promotional content.</li>
+                        </ol>
+                    </div>
+
+                    <div className="border-t border-zinc-700 pt-6">
+                        <h3 className="text-2xl text-text-primary font-serif mb-4">Key Features in Detail</h3>
+                        
+                        <div className="p-4 bg-zinc-900/50 rounded-lg">
+                            <h4 className="text-xl text-gold font-semibold">Hyper-Realistic Voices & Interruptions</h4>
+                            <p>Our AI doesn't just read lines; it performs them. It generates natural, conversational dialogue that sounds truly human. The secret is in the details: realistic pacing, emotional cues, and—most importantly—natural interruptions. This prevents the "turn-by-turn" feel of older text-to-speech, creating a dynamic and engaging listening experience.</p>
+                        </div>
+                        
+                        <div className="p-4 mt-4 bg-zinc-900/50 rounded-lg">
+                             <h4 className="text-xl text-gold font-semibold">Voice Cloning</h4>
+                            <p>Make your podcast uniquely yours. Instead of using pre-built voices, you can provide audio samples to create a custom voice clone for any host. The AI analyzes the unique characteristics of the voice—pitch, tone, and cadence—to create a digital model that can speak any line you give it.</p>
+                        </div>
+
+                         <div className="p-4 mt-4 bg-zinc-900/50 rounded-lg">
+                             <h4 className="text-xl text-gold font-semibold">Intelligent Scripting from Any Source</h4>
+                            <p>Whether you have a fully formed idea or just a spark, the AI can help. It can generate a complete script from a simple topic, a detailed research paper in PDF format, or even polish and expand upon a rough draft you provide.</p>
+                             <p className="mt-2 text-sm italic"><strong>Example:</strong> Simply providing the topic "The history of coffee" and a 10-minute length can yield a full conversational script, complete with an intro, main discussion points, and an outro.</p>
+                        </div>
+                        
+                        <div className="p-4 mt-4 bg-zinc-900/50 rounded-lg">
+                             <h4 className="text-xl text-gold font-semibold">The Production Studio & Waveform Editor</h4>
+                            <p>Once your audio is generated, you enter the Production Studio. Here you'll see a visual representation of your audio—the waveform. You can play, pause, and listen to the final product. With the integrated Audio Editor, you can select parts of the waveform to make precise edits.</p>
+                             <p className="mt-2">Use the <span className="font-mono text-gold bg-zinc-800 px-1 rounded">Zoom Slider</span> to get a closer look at the audio, allowing you to trim silence, cut mistakes, or apply fades with pinpoint accuracy.</p>
+                        </div>
+                    </div>
+
+                    <div className="border-t border-zinc-700 pt-6">
+                         <h3 className="text-2xl text-text-primary font-serif mb-4">Tips for Best Results</h3>
+                        <ul className="list-disc pl-5 space-y-2">
+                            <li><strong>For Voice Cloning:</strong> Record in a quiet environment with no background noise. Speak clearly and naturally for at least 10-15 seconds. The more clean audio you provide (up to 5 samples), the better the clone will be.</li>
+                            <li><strong>For Scripting:</strong> Be specific in your prompts. Instead of "AI," try "The impact of generative AI on creative industries." Use the "Advanced AI Rules" to guide the tone, like "Keep the tone light and humorous" or "Avoid technical jargon."</li>
+                            <li><strong>For Editing:</strong> Use headphones to catch small details in the audio. Zoom in on the waveform before making a cut to ensure you're not clipping the beginning or end of a word.</li>
+                        </ul>
+                    </div>
+
+                    <p>This application is designed to streamline the entire podcast creation workflow, giving you professional-grade tools in a simple, intuitive interface. Happy podcasting!</p>
+                </div>
+            </Card>
+        </div>
+    )
+};
+
+// FIX: Added missing TabButton, AudioEditor, and AudioEditorTab components
+const TabButton: React.FC<{ name: string; icon: React.ReactNode; isActive: boolean; onClick: () => void; }> = ({ name, icon, isActive, onClick }) => (
+    <button
+        onClick={onClick}
+        className={`flex items-center gap-3 py-4 px-6 font-bold text-lg border-b-4 transition-all duration-300 ${
+            isActive
+                ? 'border-gold text-gold'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
+        }`}
+    >
+        {icon}
+        <span>{name}</span>
+    </button>
+);
+
+const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: string, onStartOver: () => void }) => {
+    const [audioData, setAudioData] = useState<string>(initialAudioData);
+    const [audioHistory, setAudioHistory] = useState<string[]>([]);
+
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
+    const [volume, setVolume] = useState(1);
+    const audioRef = useRef<HTMLAudioElement>(null);
+
+    const waveformRef = useRef<HTMLCanvasElement>(null);
+    const waveformContainerRef = useRef<HTMLDivElement>(null);
+    const [selection, setSelection] = useState<{ start: number, end: number} | null>(null);
+    const isDraggingRef = useRef(false);
+    const [isTouch, setIsTouch] = useState(false);
+    const [zoom, setZoom] = useState(1);
+
+
+    const formatTime = (time: number) => {
+        const minutes = Math.floor(time / 60);
+        const seconds = Math.floor(time % 60);
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    };
+
+    useEffect(() => {
+        if (audioData && audioRef.current) {
+            const rawData = decode(audioData);
+            const wavBlob = pcmToWav(rawData, 24000, 1, 16);
+            const url = URL.createObjectURL(wavBlob);
+            audioRef.current.src = url;
+            return () => URL.revokeObjectURL(url);
+        }
+    }, [audioData]);
+
+    const drawWaveform = useCallback((normalizedData: number[]) => {
+        const canvas = waveformRef.current;
+        if (!canvas) return;
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.scale(dpr, dpr);
+        
+        const width = canvas.width / dpr;
+        const height = canvas.height / dpr;
+        const centerY = height / 2;
+        
+        ctx.clearRect(0, 0, width, height);
+
+        ctx.strokeStyle = '#a1a1aa';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        for(let i = 0; i < normalizedData.length; i++) {
+            const x = (i / normalizedData.length) * width;
+            const y = normalizedData[i] * centerY + centerY;
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        
+        const progressX = duration > 0 ? (currentTime / duration) * width : 0;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, progressX, height);
+        ctx.clip();
+        
+        ctx.strokeStyle = '#ECB365';
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        for(let i = 0; i < normalizedData.length; i++) {
+            const x = (i / normalizedData.length) * width;
+            const y = normalizedData[i] * centerY + centerY;
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.restore();
+
+        if (selection) {
+            ctx.fillStyle = 'rgba(225, 29, 72, 0.3)';
+            const startX = (selection.start / duration) * width;
+            const endX = (selection.end / duration) * width;
+            ctx.fillRect(startX, 0, endX - startX, height);
+        }
+    }, [currentTime, duration, selection]);
+    
+    useEffect(() => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      
+      const handleLoadedMetadata = () => { if (isFinite(audio.duration)) setDuration(audio.duration); setCurrentTime(audio.currentTime); };
+      const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
+      const handlePlay = () => setIsPlaying(true);
+      const handlePause = () => setIsPlaying(false);
+
+      audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.addEventListener('timeupdate', handleTimeUpdate);
+      audio.addEventListener('play', handlePlay);
+      audio.addEventListener('pause', handlePause);
+      audio.addEventListener('ended', handlePause);
+
+      return () => {
+          audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+          audio.removeEventListener('timeupdate', handleTimeUpdate);
+          audio.removeEventListener('play', handlePlay);
+          audio.removeEventListener('pause', handlePause);
+          audio.removeEventListener('ended', handlePause);
+      };
+    }, [audioRef]);
+
+
+    useEffect(() => {
+        if (!audioData) return;
+        
+        const rawData = decode(audioData);
+        const pcm = new Int16Array(rawData.buffer, rawData.byteOffset, rawData.length / 2);
+        const channelData = new Float32Array(pcm.length);
+        for (let i = 0; i < pcm.length; i++) {
+            channelData[i] = pcm[i] / 32768.0;
+        }
+
+        const samples = Math.floor(400 * zoom);
+        const blockSize = Math.floor(channelData.length / samples);
+        const filteredData = [];
+        for (let i = 0; i < samples; i++) {
+            let sum = 0;
+            for (let j = 0; j < blockSize; j++) {
+                sum = sum + Math.abs(channelData[blockSize * i + j]);
+            }
+            filteredData.push(sum / blockSize);
+        }
+
+        const multiplier = Math.pow(Math.max(...filteredData), -1) || 1;
+        const normalizedData = filteredData.map(n => n * multiplier * 2 - 1);
+        
+        drawWaveform(normalizedData);
+        
+    }, [audioData, drawWaveform, currentTime, selection, zoom]);
+
+    const handleWaveformInteraction = useCallback((clientX: number, type: 'down' | 'move' | 'up') => {
+        const container = waveformContainerRef.current;
+        if (!container || duration === 0) return;
+
+        const rect = container.getBoundingClientRect();
+        const scrollLeft = container.scrollLeft;
+        const totalWidth = container.scrollWidth;
+
+        const relativeX = clientX - rect.left;
+        const absoluteX = relativeX + scrollLeft;
+        
+        const time = Math.max(0, Math.min((absoluteX / totalWidth) * duration, duration));
+
+        if (type === 'down') {
+            isDraggingRef.current = true;
+            setSelection({ start: time, end: time });
+        } else if (type === 'move' && isDraggingRef.current && selection) {
+            setSelection({ ...selection, end: time });
+        } else if (type === 'up') {
+            isDraggingRef.current = false;
+            if (selection && selection.start > selection.end) {
+                setSelection({ start: selection.end, end: selection.start });
+            }
+        }
+    }, [duration, selection]);
+
+    const togglePlayPause = async () => {
+        if (!audioRef.current) return;
+        try {
+            if (audioRef.current.paused) {
+                await audioRef.current.play();
+            } else {
+                audioRef.current.pause();
+            }
+        } catch (error: any) {
+            if (error.name !== 'AbortError') {
+                console.error("Error playing/pausing audio:", error);
+            }
+        }
+    };
+    
+    const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newVolume = parseFloat(e.target.value);
+        setVolume(newVolume);
+        if (audioRef.current) {
+            audioRef.current.volume = newVolume;
+        }
+    };
+
+    const handleSeek = (time: number) => {
+        if (audioRef.current) {
+            audioRef.current.currentTime = time;
+            setCurrentTime(time);
+        }
+    };
+
+    const handleAudioEdit = (type: 'cut' | 'trim' | 'silence' | 'fadeIn' | 'fadeOut') => {
+        if (!selection || !audioData) return;
+        setAudioHistory(prev => [...prev, audioData]);
+        
+        const pcmData = decode(audioData);
+        const bytesPerSample = 2; // 16-bit
+        const sampleRate = 24000;
+        
+        let startByte = Math.floor(selection.start * sampleRate * bytesPerSample);
+        let endByte = Math.floor(selection.end * sampleRate * bytesPerSample);
+        startByte -= startByte % 2;
+        endByte -= endByte % 2;
+
+        let newData;
+        const part1 = pcmData.slice(0, startByte);
+        const selectedPart = pcmData.slice(startByte, endByte);
+        const part2 = pcmData.slice(endByte);
+
+        switch(type) {
+            case 'cut':
+                newData = concatenatePcm([part1, part2]);
+                break;
+            case 'trim':
+                newData = selectedPart;
+                break;
+            case 'silence':
+                const silenceDuration = selection.end - selection.start;
+                const silence = generateSilence(silenceDuration, sampleRate, 16);
+                newData = concatenatePcm([part1, silence, part2]);
+                break;
+            case 'fadeIn':
+                const fadedInPart = applyFade(selectedPart, 'in');
+                newData = concatenatePcm([part1, fadedInPart, part2]);
+                break;
+            case 'fadeOut':
+                const fadedOutPart = applyFade(selectedPart, 'out');
+                newData = concatenatePcm([part1, fadedOutPart, part2]);
+                break;
+            default:
+                newData = pcmData;
+        }
+
+        setAudioData(encode(newData));
+        setSelection(null);
+    };
+
+    const handleUndo = () => {
+        if (audioHistory.length > 0) {
+            const lastState = audioHistory[audioHistory.length - 1];
+            setAudioData(lastState);
+            setAudioHistory(prev => prev.slice(0, -1));
+        }
+    };
+    
+    const handleDownload = () => {
+        if (!audioData) return;
+        const rawData = decode(audioData);
+        const wavBlob = pcmToWav(rawData, 24000, 1, 16);
+        const url = URL.createObjectURL(wavBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `edited_audio_${Date.now()}.wav`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    return (
+      <div className="max-w-4xl mx-auto text-center py-12 fade-in">
+        <Card title="Audio Editor" icon={<EditIcon />}>
+            <div className="flex flex-col sm:flex-row justify-center items-center gap-4 mb-8">
+                <button onClick={onStartOver} className="w-full sm:w-auto bg-transparent border-2 border-zinc-700 font-bold py-3 px-6 rounded-lg hover:border-gold transition flex justify-center items-center gap-2">
+                    <UploadIcon /> Load New File
+                </button>
+                <button onClick={handleDownload} className="w-full sm:w-auto bg-gold text-background font-bold py-3 px-6 rounded-lg hover:opacity-90 transition flex justify-center items-center gap-2 shadow-lg shadow-gold/20">
+                    <DownloadIcon /> Download Audio
+                </button>
+            </div>
+            
+            <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl space-y-4">
+                 <div className="flex items-center gap-4 p-2 bg-zinc-800/50 rounded-lg">
+                    <ZoomOutIcon />
+                    <input 
+                        type="range" 
+                        min="1" 
+                        max="20" 
+                        step="1"
+                        value={zoom} 
+                        onChange={(e) => setZoom(parseFloat(e.target.value))}
+                        className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold"
+                        aria-label="Zoom waveform"
+                    />
+                    <ZoomInIcon />
+                </div>
+                <div ref={waveformContainerRef} className="w-full overflow-x-auto">
+                    <canvas 
+                        ref={waveformRef} 
+                        className="h-24 md:h-32 cursor-text touch-none"
+                        style={{ width: `${zoom * 100}%` }}
+                        onMouseDown={(e) => { setIsTouch(false); handleWaveformInteraction(e.clientX, 'down'); }} 
+                        onMouseMove={(e) => !isTouch && isDraggingRef.current && handleWaveformInteraction(e.clientX, 'move')} 
+                        onMouseUp={(e) => !isTouch && handleWaveformInteraction(e.clientX, 'up')} 
+                        onMouseLeave={() => { if(!isTouch) isDraggingRef.current = false; }}
+                        onTouchStart={(e) => { setIsTouch(true); handleWaveformInteraction(e.touches[0].clientX, 'down'); }}
+                        onTouchMove={(e) => handleWaveformInteraction(e.touches[0].clientX, 'move')}
+                        onTouchEnd={(e) => handleWaveformInteraction(e.changedTouches[0].clientX, 'up')}
+                    ></canvas>
+                </div>
+                <div className="flex justify-between text-sm text-text-secondary font-mono">
+                    <span>{formatTime(currentTime)}</span>
+                    <span>{formatTime(duration)}</span>
+                </div>
+                <div className="flex items-center justify-center gap-4">
+                    <button onClick={() => handleSeek(Math.max(0, currentTime - 5))} className="p-3 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><RewindIcon /></button>
+                    <button onClick={togglePlayPause} className="p-5 bg-primary text-on-primary rounded-full hover:bg-primary-hover transition transform hover:scale-110 shadow-primary-glow">
+                        {isPlaying ? <PauseIcon /> : <PlayIcon />}
+                    </button>
+                    <button onClick={() => handleSeek(Math.min(duration, currentTime + 5))} className="p-3 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><ForwardIcon /></button>
+                </div>
+                 <div className="flex items-center gap-4 pt-4">
+                    <button onClick={() => handleVolumeChange({ target: { value: volume > 0 ? '0' : '1' } } as any)}>{volume > 0 ? <VolumeHighIcon /> : <VolumeMuteIcon />}</button>
+                    <input type="range" min="0" max="1" step="0.01" value={volume} onChange={handleVolumeChange} className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" />
+                </div>
+            </div>
+
+            <div className="pt-8 mt-8 border-t border-zinc-800">
+                <h3 className="text-xl font-serif font-bold text-text-primary mb-6">Editing Tools</h3>
+                {selection && <p className="text-sm text-center text-text-secondary font-mono mb-4">Selection: {formatTime(selection.start)} to {formatTime(selection.end)} ({formatTime(selection.end - selection.start)})</p>}
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 text-center">
+                    <button onClick={handleUndo} disabled={audioHistory.length === 0} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <RestartIcon /> <span className="text-sm font-semibold">Undo</span>
+                    </button>
+                    <button onClick={() => handleAudioEdit('cut')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <CutIcon /> <span className="text-sm font-semibold">Cut</span>
+                    </button>
+                     <button onClick={() => handleAudioEdit('trim')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <TrimIcon /> <span className="text-sm font-semibold">Trim</span>
+                    </button>
+                    <button onClick={() => handleAudioEdit('silence')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <SilenceIcon /> <span className="text-sm font-semibold">Silence</span>
+                    </button>
+                    <button onClick={() => handleAudioEdit('fadeIn')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <FadeInIcon /> <span className="text-sm font-semibold">Fade In</span>
+                    </button>
+                     <button onClick={() => handleAudioEdit('fadeOut')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <FadeInIcon className="transform -scale-x-100"/> <span className="text-sm font-semibold">Fade Out</span>
+                    </button>
+                </div>
+            </div>
+            <audio ref={audioRef} className="hidden" />
+        </Card>
+      </div>
+    );
+}
+
+const AudioEditorTab = () => {
+    const [audioData, setAudioData] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+
+    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setIsLoading(true);
+        setError('');
+        try {
+            const pcmBase64 = await audioBlobToPcmBase64(file);
+            setAudioData(pcmBase64);
+        } catch (e: any) {
+            setError(e.message || 'Failed to process audio file.');
+        } finally {
+            setIsLoading(false);
+            if (event.target) event.target.value = ''; // Reset file input
+        }
+    };
+    
+    if (isLoading) {
+        return <div className="text-center py-20"><LoaderIcon /> <p className="mt-4 text-text-secondary">Processing audio...</p></div>
+    }
+
+    if (error) {
+         return (
+            <div className="max-w-2xl mx-auto text-center py-20 fade-in">
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-6 flex flex-col items-center gap-4">
+                    <ErrorIcon />
+                    <p className="font-semibold text-red-300">An Error Occurred</p>
+                    <p className="text-red-400/80 text-sm">{error}</p>
+                     <button 
+                        onClick={() => setError('')}
+                        className="w-full sm:w-auto bg-primary text-on-primary font-bold py-2 px-6 rounded-lg hover:bg-primary-hover transition mt-4"
+                    >
+                        Try Again
+                    </button>
+                </div>
+            </div>
+        )
+    }
+
+    if (!audioData) {
+        return (
+            <div className="max-w-2xl mx-auto text-center py-20 fade-in">
+                <Card title="Standalone Audio Editor">
+                    <p className="text-text-secondary">Load an existing podcast or any audio file to make quick edits. The editor works with raw audio data and is perfect for trimming intros, cutting sections, or cleaning up your final track.</p>
+                    <input type="file" accept="audio/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+                    <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full bg-primary text-on-primary font-bold py-4 px-10 rounded-lg hover:bg-primary-hover transition flex justify-center items-center gap-2 text-lg shadow-primary-glow mt-8"
+                    >
+                        <UploadIcon /> Load Audio File
+                    </button>
+                </Card>
+            </div>
+        )
+    }
+    
+    return <AudioEditor initialAudioData={audioData} onStartOver={() => setAudioData(null)} />;
+};
+
+// FIX: Added the main App component to provide the default export
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('creator');
   const [currentStep, setCurrentStep] = useState(1);
@@ -1065,6 +1643,8 @@ export default function App() {
   const [contactDetails, setContactDetails] = useState('');
   const [website, setWebsite] = useState('');
   const [slogan, setSlogan] = useState('');
+  const [backgroundSound, setBackgroundSound] = useState('none');
+  const [backgroundVolume, setBackgroundVolume] = useState(0.1);
   
   // Step 4
   const [audioData, setAudioData] = useState<string | null>(null);
@@ -1105,6 +1685,7 @@ export default function App() {
       setThirdHostGender('male'); setThirdHostVoice('Zephyr'); setThirdHostCustomSamples([]);
       setScript(null); setAudioData(null); setScriptTimings(null);
       setBrandedName('Brands by Ai'); setContactDetails(''); setWebsite(''); setSlogan('');
+      setBackgroundSound('none'); setBackgroundVolume(0.1);
       setError(''); setIsLoadingScript(false); setIsLoadingAudio(false);
       setAreTimingsStale(false); setAdText(null); setAdScript(null);
       
@@ -1145,7 +1726,6 @@ export default function App() {
   useEffect(() => {
     try {
         const storableEpisodes = episodes.map(ep => {
-            // Exclude large data strings to avoid exceeding localStorage quota.
             const { audioData, samanthaCustomSamples, stewardCustomSamples, thirdHostCustomSamples, ...storableEpisode } = ep;
             return { 
                 ...storableEpisode, 
@@ -1221,7 +1801,7 @@ export default function App() {
       const thirdHostVoiceConfig = isThirdHostEnabled && thirdHostName ? await getVoiceConfig(thirdHostCustomSamples, thirdHostVoice) : undefined;
       
       const thirdHostPayload = isThirdHostEnabled && thirdHostName && thirdHostVoiceConfig ? { name: thirdHostName, voiceConfig: thirdHostVoiceConfig, gender: thirdHostGender } : undefined;
-      const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, thirdHostPayload, 'South African');
+      const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, thirdHostPayload, 'South African', backgroundSound, backgroundVolume);
       setAudioData(audioData); setScriptTimings(timings); setCurrentStep(4);
     } catch (e: any) {
       setError(`Failed to generate audio: ${e.message}`);
@@ -1229,7 +1809,7 @@ export default function App() {
     } finally {
       setIsLoadingAudio(false);
     }
-  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, thirdHostCustomSamples, samanthaName, stewardName, isThirdHostEnabled, thirdHostName, thirdHostVoice, thirdHostGender]);
+  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, thirdHostCustomSamples, samanthaName, stewardName, isThirdHostEnabled, thirdHostName, thirdHostVoice, thirdHostGender, backgroundSound, backgroundVolume]);
 
   const handleDownloadAudio = () => {
     if (!audioData) return;
@@ -1381,7 +1961,7 @@ export default function App() {
         samanthaName, stewardName, samanthaVoice, samanthaCustomSamples, stewardVoice, stewardCustomSamples,
         isThirdHostEnabled, thirdHostName, thirdHostRole, thirdHostGender, thirdHostVoice, thirdHostCustomSamples,
         prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength,
-        script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound: 'none', audioData,
+        script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound, backgroundVolume, audioData,
         adText, adScript
     };
     if (loadedEpisodeId) {
@@ -1408,6 +1988,7 @@ export default function App() {
     setManualScriptText(ep.manualScriptText); setCustomRules(ep.customRules); setLanguage(ep.language); setEpisodeLength(ep.episodeLength || 10);
     setScript(ep.script); setScriptTimings(ep.scriptTimings); setBrandedName(ep.brandedName);
     setContactDetails(ep.contactDetails); setWebsite(ep.website); setSlogan(ep.slogan);
+    setBackgroundSound(ep.backgroundSound); setBackgroundVolume(ep.backgroundVolume || 0.1);
     setAudioData(ep.audioData); setEpisodeTitle(ep.title); setEpisodeNumber(ep.episodeNumber);
     setLoadedEpisodeId(ep.id);
     setAdText(ep.adText || null); setAdScript(ep.adScript || null);
@@ -1424,7 +2005,7 @@ export default function App() {
     switch(currentStep) {
       case 1: return <StepHosts error={error} setError={setError} samanthaName={samanthaName} setSamanthaName={setSamanthaName} stewardName={stewardName} setStewardName={setStewardName} samanthaVoice={samanthaVoice} setSamanthaVoice={setSamanthaVoice} stewardVoice={stewardVoice} setStewardVoice={setStewardVoice} isThirdHostEnabled={isThirdHostEnabled} setIsThirdHostEnabled={setIsThirdHostEnabled} thirdHostName={thirdHostName} setThirdHostName={setThirdHostName} thirdHostRole={thirdHostRole} setThirdHostRole={setThirdHostRole} thirdHostGender={thirdHostGender} setThirdHostGender={setThirdHostGender} thirdHostVoice={thirdHostVoice} setThirdHostVoice={setThirdHostVoice} isPreviewingSamantha={isPreviewingSamantha} isPreviewingSteward={isPreviewingSteward} isPreviewingThirdHost={isPreviewingThirdHost} handlePreviewVoice={handlePreviewVoice} femaleVoices={femaleVoices} maleVoices={maleVoices} areHostsValid={areHostsValid} setCurrentStep={setCurrentStep} samanthaCustomSamples={samanthaCustomSamples} isPreviewingSamanthaCustom={isPreviewingSamanthaCustom} isRecordingSamantha={isRecordingSamantha} samanthaAudioFileInputRef={samanthaAudioFileInputRef} stewardCustomSamples={stewardCustomSamples} isPreviewingStewardCustom={isPreviewingStewardCustom} isRecordingSteward={isRecordingSteward} stewardAudioFileInputRef={stewardAudioFileInputRef} thirdHostCustomSamples={thirdHostCustomSamples} isPreviewingThirdHostCustom={isPreviewingThirdHostCustom} isRecordingThirdHost={isRecordingThirdHost} thirdHostAudioFileInputRef={thirdHostAudioFileInputRef} handlePreviewCustomVoice={handlePreviewCustomVoice} handleRemoveCustomAudio={handleRemoveCustomAudio} handleToggleRecording={handleToggleRecording} handleAudioFileChange={handleAudioFileChange} isPreviewingQuality={isPreviewingQuality} handlePreviewQuality={handlePreviewQuality} />;
       case 2: return <StepContent error={error} episodeTitle={episodeTitle} setEpisodeTitle={setEpisodeTitle} episodeNumber={episodeNumber} setEpisodeNumber={setEpisodeNumber} episodeLength={episodeLength} setEpisodeLength={setEpisodeLength} language={language} setLanguage={setLanguage} prompt={prompt} setPrompt={setPrompt} fileName={fileName} fileInputRef={fileInputRef} handleFileChange={handleFileChange} samanthaName={samanthaName} stewardName={stewardName} manualScriptText={manualScriptText} setManualScriptText={setManualScriptText} customRules={customRules} setCustomRules={setCustomRules} setCurrentStep={setCurrentStep} handleGenerateScript={handleGenerateScript} isLoadingScript={isLoadingScript} areContentInputsValid={areContentInputsValid} />;
-      case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} />;
+      case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} backgroundSound={backgroundSound} setBackgroundSound={setBackgroundSound} backgroundVolume={backgroundVolume} setBackgroundVolume={setBackgroundVolume} />;
       case 4: return script && audioData && scriptTimings ? <StepStudio audioData={audioData} setAudioData={setAudioData} script={script} scriptTimings={scriptTimings} handleDownloadAudio={handleDownloadAudio} handleStartOver={handleStartOver} handleSaveOrUpdateEpisode={handleSaveOrUpdateEpisode} loadedEpisodeId={loadedEpisodeId} areTimingsStale={areTimingsStale} setAreTimingsStale={setAreTimingsStale} adText={adText} setAdText={setAdText} adScript={adScript} setAdScript={setAdScript} episodeTitle={episodeTitle} brandedName={brandedName}/> : <div>Loading...</div>;
       default: return <div />;
     }
@@ -1439,7 +2020,6 @@ export default function App() {
             <p className="text-lg text-text-secondary">Craft, edit, and produce professional podcasts with AI.</p>
         </header>
         
-        {/* Main Tab Navigation */}
         <div className="w-full mb-12">
             <h2 className="text-center text-2xl font-serif font-bold text-gold mb-4 tracking-wider">Select Your Workspace</h2>
             <div className="w-full border-b border-zinc-800 flex justify-center">
@@ -1483,572 +2063,3 @@ export default function App() {
     </div>
   );
 }
-
-const TabButton: React.FC<{ name: string; icon: React.ReactNode; isActive: boolean; onClick: () => void; }> = ({ name, icon, isActive, onClick }) => (
-    <button
-        onClick={onClick}
-        className={`flex items-center gap-3 py-4 px-6 font-bold text-lg border-b-4 transition-all duration-300 ${
-            isActive
-                ? 'border-gold text-gold'
-                : 'border-transparent text-text-secondary hover:text-text-primary'
-        }`}
-    >
-        {icon}
-        <span>{name}</span>
-    </button>
-);
-
-const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: string, onStartOver: () => void }) => {
-    const [audioData, setAudioData] = useState<string>(initialAudioData);
-    const [audioHistory, setAudioHistory] = useState<string[]>([]);
-
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [currentTime, setCurrentTime] = useState(0);
-    const [duration, setDuration] = useState(0);
-    const [volume, setVolume] = useState(1);
-    const audioRef = useRef<HTMLAudioElement>(null);
-
-    const waveformRef = useRef<HTMLCanvasElement>(null);
-    const waveformContainerRef = useRef<HTMLDivElement>(null);
-    const [selection, setSelection] = useState<{ start: number, end: number} | null>(null);
-    const isDraggingRef = useRef(false);
-    const [isTouch, setIsTouch] = useState(false);
-    const [zoom, setZoom] = useState(1);
-    const [waveformMarkers, setWaveformMarkers] = useState<{ time: string; left: string; }[]>([]);
-
-    // State for advanced effects
-    const [activeEffect, setActiveEffect] = useState<EffectType | null>(null);
-    const [gain, setGain] = useState(1.0); // 1.0 = no change
-    const [noiseThreshold, setNoiseThreshold] = useState(0.05); // 5%
-    const [speed, setSpeed] = useState(1.0); // 1.0x speed
-
-
-    useEffect(() => {
-        if (audioData && audioRef.current) {
-            const rawData = decode(audioData);
-            const wavBlob = pcmToWav(rawData, 24000, 1, 16);
-            const url = URL.createObjectURL(wavBlob);
-            audioRef.current.src = url;
-            return () => URL.revokeObjectURL(url);
-        }
-    }, [audioData]);
-
-    const drawWaveform = useCallback((normalizedData: number[]) => {
-        const canvas = waveformRef.current;
-        if (!canvas) return;
-        const dpr = window.devicePixelRatio || 1;
-        const rect = canvas.getBoundingClientRect();
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.scale(dpr, dpr);
-        
-        const width = canvas.width / dpr;
-        const height = canvas.height / dpr;
-        const centerY = height / 2;
-        
-        ctx.clearRect(0, 0, width, height);
-
-        const barWidth = 2;
-        const gap = 2;
-        const totalBarWidth = barWidth + gap;
-
-        const mainGradient = ctx.createLinearGradient(0, 0, width, 0);
-        mainGradient.addColorStop(0, '#e879f9');
-        mainGradient.addColorStop(0.6, '#60a5fa');
-        mainGradient.addColorStop(1, '#3b82f6');
-
-        const progressGradient = ctx.createLinearGradient(0, 0, width, 0);
-        progressGradient.addColorStop(0, '#fcd34d');
-        progressGradient.addColorStop(1, '#ECB365');
-
-        const drawBars = (gradient: CanvasGradient) => {
-            ctx.fillStyle = gradient;
-            normalizedData.forEach((sample, i) => {
-                const x = i * totalBarWidth;
-                const barHeight = Math.max(1, sample * height);
-                ctx.fillRect(x, centerY - barHeight / 2, barWidth, barHeight);
-            });
-        };
-        
-        drawBars(mainGradient);
-        
-        const progressX = duration > 0 ? (currentTime / duration) * width : 0;
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, 0, progressX, height);
-        ctx.clip();
-        drawBars(progressGradient);
-        ctx.restore();
-
-        if (selection) {
-            ctx.fillStyle = 'rgba(225, 29, 72, 0.4)';
-            const startX = (selection.start / duration) * width;
-            const endX = (selection.end / duration) * width;
-            ctx.fillRect(startX, 0, endX - startX, height);
-        }
-    }, [currentTime, duration, selection]);
-    
-    useEffect(() => {
-      const audio = audioRef.current;
-      if (!audio) return;
-      const handleMeta = () => { if (isFinite(audio.duration)) setDuration(audio.duration); setCurrentTime(audio.currentTime); };
-      const handleTime = () => setCurrentTime(audio.currentTime);
-      const handlePlay = () => setIsPlaying(true);
-      const handlePause = () => setIsPlaying(false);
-      audio.addEventListener('loadedmetadata', handleMeta);
-      audio.addEventListener('timeupdate', handleTime);
-      audio.addEventListener('play', handlePlay);
-      audio.addEventListener('pause', handlePause);
-      audio.addEventListener('ended', handlePause);
-      return () => {
-          audio.removeEventListener('loadedmetadata', handleMeta);
-          audio.removeEventListener('timeupdate', handleTime);
-          audio.removeEventListener('play', handlePlay);
-          audio.removeEventListener('pause', handlePause);
-          audio.removeEventListener('ended', handlePause);
-      };
-    }, [audioRef]);
-
-
-    useEffect(() => {
-        if (!audioData) return;
-        const rawData = decode(audioData);
-        const pcm = new Int16Array(rawData.buffer, rawData.byteOffset, rawData.length / 2);
-
-        const width = waveformRef.current?.getBoundingClientRect().width || 0;
-        const totalBarWidth = 4;
-        const samples = Math.floor(width / totalBarWidth);
-        if(samples <= 0) return;
-
-        const blockSize = Math.floor(pcm.length / samples);
-        const filteredData = [];
-        for (let i = 0; i < samples; i++) {
-            let blockMax = 0;
-            for (let j = 0; j < blockSize; j++) {
-                const sample = Math.abs(pcm[blockSize * i + j]);
-                if (sample > blockMax) blockMax = sample;
-            }
-            filteredData.push(blockMax);
-        }
-
-        const maxVal = Math.max(...filteredData);
-        const multiplier = maxVal > 0 ? 1 / maxVal : 0;
-        const normalizedData = filteredData.map(n => n * multiplier);
-        
-        drawWaveform(normalizedData);
-        
-    }, [audioData, drawWaveform, currentTime, selection, zoom]);
-    
-    useEffect(() => {
-        const container = waveformContainerRef.current;
-        if(container && duration > 0) {
-            setWaveformMarkers(getTimestampMarkers(duration, zoom, container.clientWidth * zoom));
-        }
-    }, [duration, zoom, audioData]);
-
-
-    const handleWaveformInteraction = useCallback((clientX: number, type: 'down' | 'move' | 'up') => {
-        const container = waveformContainerRef.current;
-        if (!container || duration === 0) return;
-
-        const rect = container.getBoundingClientRect();
-        const scrollLeft = container.scrollLeft;
-        const totalWidth = container.scrollWidth;
-        const relativeX = clientX - rect.left;
-        const absoluteX = relativeX + scrollLeft;
-        const time = Math.max(0, Math.min((absoluteX / totalWidth) * duration, duration));
-
-        if (type === 'down') {
-            isDraggingRef.current = true;
-            setSelection({ start: time, end: time });
-        } else if (type === 'move' && isDraggingRef.current && selection) {
-            setSelection({ ...selection, end: time });
-        } else if (type === 'up') {
-            isDraggingRef.current = false;
-            if (selection && selection.start > selection.end) {
-                setSelection({ start: selection.end, end: selection.start });
-            }
-        }
-    }, [duration, selection]);
-
-    const togglePlayPause = async () => {
-        if (!audioRef.current) return;
-        try {
-            if (audioRef.current.paused) await audioRef.current.play();
-            else audioRef.current.pause();
-        } catch (error: any) { if (error.name !== 'AbortError') console.error("Playback error:", error); }
-    };
-    
-    const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const newVolume = parseFloat(e.target.value);
-        setVolume(newVolume);
-        if (audioRef.current) audioRef.current.volume = newVolume;
-    };
-
-    const handleSeek = (time: number) => {
-        if (audioRef.current) audioRef.current.currentTime = time;
-    };
-
-    const handleApplyEffect = () => {
-        if (!selection || !audioData || !activeEffect) return;
-
-        setAudioHistory(prev => [...prev, audioData]);
-        
-        const pcmData = decode(audioData);
-        const bytesPerSample = 2;
-        const sampleRate = 24000;
-        
-        let startByte = Math.floor(selection.start * sampleRate * bytesPerSample);
-        let endByte = Math.floor(selection.end * sampleRate * bytesPerSample);
-        startByte -= startByte % 2;
-        endByte -= endByte % 2;
-
-        const part1 = pcmData.slice(0, startByte);
-        const selectedPart = pcmData.slice(startByte, endByte);
-        const part2 = pcmData.slice(endByte);
-
-        let modifiedPart;
-        switch(activeEffect) {
-            case 'volume': modifiedPart = applyGain(selectedPart, gain); break;
-            case 'noise': modifiedPart = applyNoiseGate(selectedPart, noiseThreshold); break;
-            case 'speed': modifiedPart = changeSpeed(selectedPart, speed); break;
-            default: modifiedPart = selectedPart;
-        }
-
-        const newData = concatenatePcm([part1, modifiedPart, part2]);
-        setAudioData(encode(newData));
-        setSelection(null);
-        setActiveEffect(null); // Close effect panel after applying
-    }
-
-    const handleDirectAction = (type: 'cut' | 'trim' | 'silence' | 'fadeIn' | 'fadeOut') => {
-        if (!selection || !audioData) return;
-        setAudioHistory(prev => [...prev, audioData]);
-        
-        const pcmData = decode(audioData);
-        const bytesPerSample = 2;
-        const sampleRate = 24000;
-        
-        let startByte = Math.floor(selection.start * sampleRate * bytesPerSample);
-        let endByte = Math.floor(selection.end * sampleRate * bytesPerSample);
-        startByte -= startByte % 2;
-        endByte -= endByte % 2;
-
-        let newData;
-        const part1 = pcmData.slice(0, startByte);
-        const selectedPart = pcmData.slice(startByte, endByte);
-        const part2 = pcmData.slice(endByte);
-
-        switch(type) {
-            case 'cut': newData = concatenatePcm([part1, part2]); break;
-            case 'trim': newData = selectedPart; break;
-            case 'silence': newData = concatenatePcm([part1, generateSilence(selection.end - selection.start, sampleRate, 16), part2]); break;
-            case 'fadeIn': newData = concatenatePcm([part1, applyFade(selectedPart, 'in'), part2]); break;
-            case 'fadeOut':newData = concatenatePcm([part1, applyFade(selectedPart, 'out'), part2]); break;
-            default: newData = pcmData;
-        }
-
-        setAudioData(encode(newData));
-        setSelection(null);
-    };
-
-    const handleUndo = () => {
-        if (audioHistory.length > 0) {
-            const lastState = audioHistory[audioHistory.length - 1];
-            setAudioData(lastState);
-            setAudioHistory(prev => prev.slice(0, -1));
-        }
-    };
-    
-    const handleDownload = () => {
-        if (!audioData) return;
-        const rawData = decode(audioData);
-        const wavBlob = pcmToWav(rawData, 24000, 1, 16);
-        const url = URL.createObjectURL(wavBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `edited_audio_${Date.now()}.wav`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    };
-
-    const renderEffectPanel = () => {
-        if (!activeEffect || !selection) return null;
-        
-        let content;
-        switch(activeEffect) {
-            case 'volume':
-                content = <>
-                    <label className="text-sm font-semibold">Gain: {((gain - 1) * 100).toFixed(0)}%</label>
-                    <input type="range" min="0" max="2" step="0.05" value={gain} onChange={(e) => setGain(parseFloat(e.target.value))} className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" />
-                </>;
-                break;
-            case 'noise':
-                 content = <>
-                    <label className="text-sm font-semibold">Threshold: {(noiseThreshold * 100).toFixed(0)}%</label>
-                    <input type="range" min="0" max="0.5" step="0.01" value={noiseThreshold} onChange={(e) => setNoiseThreshold(parseFloat(e.target.value))} className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" />
-                </>;
-                break;
-            case 'speed':
-                 content = <>
-                    <label className="text-sm font-semibold">Speed: {speed.toFixed(2)}x</label>
-                    <input type="range" min="0.5" max="2" step="0.05" value={speed} onChange={(e) => setSpeed(parseFloat(e.target.value))} className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" />
-                </>;
-                break;
-            default: return null;
-        }
-        
-        return (
-            <div className="bg-zinc-900/70 border border-zinc-700 rounded-lg p-4 space-y-3 animate-fade-in-scale">
-                <div className="flex justify-between items-center">
-                    <h4 className="font-bold capitalize text-gold">{activeEffect}</h4>
-                    <button onClick={() => setActiveEffect(null)}><CloseIcon className="h-4 w-4"/></button>
-                </div>
-                {content}
-                <button onClick={handleApplyEffect} className="w-full bg-gold text-background font-bold py-2 px-4 rounded-lg hover:opacity-90 transition text-sm">Apply Effect</button>
-            </div>
-        )
-    }
-
-    return (
-      <div className="max-w-5xl mx-auto text-center py-12 fade-in">
-        <Card title="Professional Audio Editor" icon={<EditIcon />}>
-            <div className="flex flex-col sm:flex-row justify-center items-center gap-4 mb-8">
-                <button onClick={onStartOver} className="w-full sm:w-auto bg-transparent border-2 border-zinc-700 font-bold py-3 px-6 rounded-lg hover:border-gold transition flex justify-center items-center gap-2">
-                    <UploadIcon /> Load New File
-                </button>
-                <button onClick={handleDownload} className="w-full sm:w-auto bg-gold text-background font-bold py-3 px-6 rounded-lg hover:opacity-90 transition flex justify-center items-center gap-2 shadow-lg shadow-gold/20">
-                    <DownloadIcon /> Download Audio
-                </button>
-            </div>
-            
-            <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl space-y-4">
-                 <div className="flex items-center gap-4 p-2 bg-zinc-800/50 rounded-lg">
-                    <ZoomOutIcon />
-                    <input type="range" min="1" max="20" step="1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" aria-label="Zoom waveform" />
-                    <ZoomInIcon />
-                </div>
-                <div ref={waveformContainerRef} className="w-full overflow-x-auto cursor-text touch-none">
-                    <div className="relative" style={{ width: `${zoom * 100}%` }}>
-                        <canvas ref={waveformRef} className="h-24 md:h-32 w-full" onMouseDown={(e) => { setIsTouch(false); handleWaveformInteraction(e.clientX, 'down'); }} onMouseMove={(e) => !isTouch && isDraggingRef.current && handleWaveformInteraction(e.clientX, 'move')} onMouseUp={(e) => !isTouch && handleWaveformInteraction(e.clientX, 'up')} onMouseLeave={() => { if(!isTouch) isDraggingRef.current = false; }} onTouchStart={(e) => { setIsTouch(true); handleWaveformInteraction(e.touches[0].clientX, 'down'); }} onTouchMove={(e) => handleWaveformInteraction(e.touches[0].clientX, 'move')} onTouchEnd={(e) => handleWaveformInteraction(e.changedTouches[0].clientX, 'up')}></canvas>
-                         <div className="absolute top-full left-0 right-0 h-4 mt-1">
-                            {waveformMarkers.map(marker => (
-                                <div key={marker.time} className="absolute -top-1" style={{ left: marker.left }}>
-                                    <div className="w-px h-2 bg-zinc-600" />
-                                    <span className="absolute text-xs text-zinc-500 transform -translate-x-1/2 mt-1 font-mono">{marker.time}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-                <div className="flex justify-between text-sm text-text-secondary font-mono pt-4">
-                    <span>{formatTime(currentTime)}</span>
-                    <span>{formatTime(duration)}</span>
-                </div>
-                <div className="flex items-center justify-center gap-4">
-                    <button onClick={() => handleSeek(Math.max(0, currentTime - 5))} className="p-3 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><RewindIcon /></button>
-                    <button onClick={togglePlayPause} className="p-5 bg-primary text-on-primary rounded-full hover:bg-primary-hover transition transform hover:scale-110 shadow-primary-glow">
-                        {isPlaying ? <PauseIcon /> : <PlayIcon />}
-                    </button>
-                    <button onClick={() => handleSeek(Math.min(duration, currentTime + 5))} className="p-3 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><ForwardIcon /></button>
-                </div>
-                 <div className="flex items-center gap-4 pt-4">
-                    <button onClick={() => handleVolumeChange({ target: { value: volume > 0 ? '0' : '1' } } as any)}>{volume > 0 ? <VolumeHighIcon /> : <VolumeMuteIcon />}</button>
-                    <input type="range" min="0" max="1" step="0.01" value={volume} onChange={handleVolumeChange} className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" />
-                </div>
-            </div>
-
-            <div className="pt-8 mt-8 border-t border-zinc-800">
-                <h3 className="text-xl font-serif font-bold text-text-primary mb-6">Editing Tools</h3>
-                {selection && <p className="text-sm text-center text-text-secondary font-mono mb-4">Selection: {formatTime(selection.start)} to {formatTime(selection.end)} ({formatTime(selection.end - selection.start)})</p>}
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {/* Direct Actions */}
-                    <div className="space-y-4">
-                        <h4 className="font-bold text-lg text-text-primary text-left">Direct Actions</h4>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-center">
-                            <button onClick={handleUndo} disabled={audioHistory.length === 0} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                <RestartIcon /> <span className="text-sm font-semibold">Undo</span>
-                            </button>
-                            <button onClick={() => handleDirectAction('cut')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                <CutIcon /> <span className="text-sm font-semibold">Cut</span>
-                            </button>
-                            <button onClick={() => handleDirectAction('trim')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                <TrimIcon /> <span className="text-sm font-semibold">Trim</span>
-                            </button>
-                            <button onClick={() => handleDirectAction('silence')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                <SilenceIcon /> <span className="text-sm font-semibold">Silence</span>
-                            </button>
-                            <button onClick={() => handleDirectAction('fadeIn')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                <FadeInIcon /> <span className="text-sm font-semibold">Fade In</span>
-                            </button>
-                            <button onClick={() => handleDirectAction('fadeOut')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                                <FadeInIcon className="transform -scale-x-100"/> <span className="text-sm font-semibold">Fade Out</span>
-                            </button>
-                        </div>
-                    </div>
-                    {/* Effects */}
-                     <div className="space-y-4">
-                        <h4 className="font-bold text-lg text-text-primary text-left">Effects</h4>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-center">
-                            <button onClick={() => setActiveEffect('volume')} disabled={!selection} className={`flex flex-col items-center justify-center gap-2 p-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed ${activeEffect === 'volume' ? 'bg-gold/20 text-gold border-2 border-gold' : 'bg-zinc-800/50 hover:bg-zinc-700'}`}>
-                                <GainIcon /> <span className="text-sm font-semibold">Volume</span>
-                            </button>
-                            <button onClick={() => setActiveEffect('noise')} disabled={!selection} className={`flex flex-col items-center justify-center gap-2 p-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed ${activeEffect === 'noise' ? 'bg-gold/20 text-gold border-2 border-gold' : 'bg-zinc-800/50 hover:bg-zinc-700'}`}>
-                                <NoiseGateIcon /> <span className="text-sm font-semibold">Noise Gate</span>
-                            </button>
-                            <button onClick={() => setActiveEffect('speed')} disabled={!selection} className={`flex flex-col items-center justify-center gap-2 p-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed ${activeEffect === 'speed' ? 'bg-gold/20 text-gold border-2 border-gold' : 'bg-zinc-800/50 hover:bg-zinc-700'}`}>
-                                <SpeedIcon /> <span className="text-sm font-semibold">Speed</span>
-                            </button>
-                        </div>
-                        <div className="pt-2 min-h-[120px]">
-                            {renderEffectPanel()}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <audio ref={audioRef} className="hidden" />
-        </Card>
-      </div>
-    );
-}
-
-const AudioEditorTab = () => {
-    const [audioData, setAudioData] = useState<string | null>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const [error, setError] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-
-    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-
-        setIsLoading(true);
-        setError('');
-        try {
-            const pcmBase64 = await audioBlobToPcmBase64(file);
-            setAudioData(pcmBase64);
-        } catch (e: any) {
-            setError(e.message || 'Failed to process audio file.');
-        } finally {
-            setIsLoading(false);
-            if (event.target) event.target.value = ''; // Reset file input
-        }
-    };
-    
-    if (isLoading) {
-        return <div className="text-center py-20"><LoaderIcon /> <p className="mt-4 text-text-secondary">Processing audio...</p></div>
-    }
-
-    if (error) {
-         return (
-            <div className="max-w-2xl mx-auto text-center py-20 fade-in">
-                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-6 flex flex-col items-center gap-4">
-                    <ErrorIcon />
-                    <p className="font-semibold text-red-300">An Error Occurred</p>
-                    <p className="text-red-400/80 text-sm">{error}</p>
-                     <button 
-                        onClick={() => setError('')}
-                        className="w-full sm:w-auto bg-primary text-on-primary font-bold py-2 px-6 rounded-lg hover:bg-primary-hover transition mt-4"
-                    >
-                        Try Again
-                    </button>
-                </div>
-            </div>
-        )
-    }
-
-    if (!audioData) {
-        return (
-            <div className="max-w-2xl mx-auto text-center py-20 fade-in">
-                <Card title="Standalone Audio Editor">
-                    <p className="text-text-secondary">Load an existing podcast or any audio file to make quick edits. The editor works with raw audio data and is perfect for trimming intros, cutting sections, or cleaning up your final track.</p>
-                    <input type="file" accept="audio/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-                    <button 
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-full bg-primary text-on-primary font-bold py-4 px-10 rounded-lg hover:bg-primary-hover transition flex justify-center items-center gap-2 text-lg shadow-primary-glow mt-8"
-                    >
-                        <UploadIcon /> Load Audio File
-                    </button>
-                </Card>
-            </div>
-        )
-    }
-    
-    return <AudioEditor initialAudioData={audioData} onStartOver={() => setAudioData(null)} />;
-};
-
-const AboutTab = () => {
-    const Feature = ({ title, illustration, children }: PropsWithChildren<{title: string, illustration: React.ReactNode}>) => (
-        <div className="grid md:grid-cols-3 gap-8 items-center">
-            <div className="md:col-span-1 flex justify-center text-gold">{illustration}</div>
-            <div className="md:col-span-2">
-                <h4 className="text-3xl font-serif text-gold mb-4">{title}</h4>
-                <div className="space-y-4">{children}</div>
-            </div>
-        </div>
-    );
-    
-    return (
-        <div className="max-w-5xl mx-auto py-12 px-4 sm:px-0 fade-in">
-            <Card title="About AI Podcast Studio" icon={<InfoIcon />}>
-                <div className="prose prose-invert prose-xl prose-headings:font-serif prose-headings:text-gold prose-a:text-primary hover:prose-a:text-primary-hover text-text-secondary space-y-16">
-                    <div>
-                        <p className="lead text-2xl text-text-primary">
-                            Welcome to the <span className="font-bold text-gold">AI Podcast Studio</span>, an all-in-one platform designed to transform your ideas into professional, ready-to-publish podcasts with the power of generative AI.
-                        </p>
-                        <p>
-                            Whether you're a seasoned creator or just starting, this studio provides a seamless workflow from script generation and voice cloning to audio production and final edits. Forget the technical hurdles and focus on what matters most: your message.
-                        </p>
-                    </div>
-
-                    <div className="border-y-2 border-zinc-800 py-12">
-                        <h3 className="text-center text-4xl mb-10">Your Journey from Idea to Episode</h3>
-                        <Feature title="The 4-Step Workflow" illustration={<WorkflowIllustration className="w-48 h-48"/>}>
-                            <p>We've streamlined the complex process of podcast creation into four intuitive steps, guiding you from initial concept to the final audio file.</p>
-                            <ol className="list-none p-0 space-y-3">
-                                <li className="flex items-center gap-4"><strong className="text-gold font-serif text-2xl">I.</strong> Define your hosts with unique pre-built or custom-cloned voices.</li>
-                                <li className="flex items-center gap-4"><strong className="text-gold font-serif text-2xl">II.</strong> Provide your content—a topic, a document, or a draft—and set the AI's creative rules.</li>
-                                <li className="flex items-center gap-4"><strong className="text-gold font-serif text-2xl">III.</strong> Review and refine the AI-generated script to match your vision perfectly.</li>
-                                <li className="flex items-center gap-4"><strong className="text-gold font-serif text-2xl">IV.</strong> Generate the audio, listen in the studio, and use the editor for final polishing.</li>
-                            </ol>
-                        </Feature>
-                    </div>
-
-                    <div>
-                        <h3 className="text-center text-4xl mb-10">Core Technologies Unveiled</h3>
-                         <div className="space-y-16">
-                            <Feature title="Hyper-Realistic Conversational AI" illustration={<VoiceCloningIllustration className="w-48 h-48"/>}>
-                                <p>This isn't your typical text-to-speech. Our AI generates dialogue that captures the subtle nuances of human conversation, including natural pacing, emotional inflections, and realistic interruptions. This creates a dynamic, engaging back-and-forth that keeps listeners hooked.</p>
-                                <p className="font-semibold text-text-primary">For a personal touch, use the Voice Cloning feature to create a digital model of your own voice, ensuring brand consistency and a unique identity for your show.</p>
-                            </Feature>
-                            
-                            <Feature title="Intelligent Script Generation" illustration={<AiScriptingIllustration className="w-48 h-48"/>}>
-                                <p>The AI acts as your co-writer. Feed it a simple topic, a dense research paper, or a half-finished draft, and it will generate a complete, conversational script tailored to your hosts' personas and desired episode length.</p>
-                                <p className="font-semibold text-text-primary">Use the "Advanced AI Rules" to give the model specific instructions, like maintaining a certain tone, avoiding particular topics, or ensuring a host asks certain questions.</p>
-                            </Feature>
-
-                            <Feature title="Professional Editing Suite" illustration={<EditingSuiteIllustration className="w-48 h-48"/>}>
-                                <p>Both the Production Studio and Standalone Editor feature a powerful waveform editor for precise, non-destructive editing. Zoom in to make sample-accurate cuts, trim silence, or apply effects with confidence.</p>
-                                <p className="font-semibold text-text-primary">The advanced toolkit includes a <strong className="text-gold">Noise Gate</strong> to remove background hiss, <strong className="text-gold">Gain</strong> control to balance volume, and <strong className="text-gold">Speed</strong> adjustment for creative effects.</p>
-                            </Feature>
-                        </div>
-                    </div>
-
-                    <div className="border-t-2 border-zinc-800 pt-12">
-                         <h3 className="text-4xl">Tips for Professional Results</h3>
-                        <ul className="list-none p-0 mt-8 space-y-6">
-                            <li><strong className="text-gold">For Voice Cloning:</strong> Record in a quiet space using a quality microphone. Provide 15-30 seconds of clear, natural speech without background noise. The cleaner the sample, the better the clone will be.</li>
-                            <li><strong className="text-gold">For Scripting:</strong> Be descriptive in your prompts. Instead of "Artificial Intelligence," try "The ethical implications of AI in modern art." This specificity guides the AI to produce more focused and interesting content.</li>
-                            <li><strong className="text-gold">For Editing:</strong> Always listen with headphones to catch subtle imperfections. When cutting, zoom in on the waveform to ensure you're not clipping the start or end of a word. Make small, incremental adjustments and use the Undo feature freely.</li>
-                        </ul>
-                    </div>
-                </div>
-            </Card>
-        </div>
-    );
-};
