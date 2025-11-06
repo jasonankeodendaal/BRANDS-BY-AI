@@ -1,3 +1,4 @@
+// FIX: Removed self-import of GuestHost which conflicts with the declaration below.
 export interface ScriptLine {
   speaker: string;
   dialogue: string;
@@ -23,6 +24,15 @@ export interface ScriptTiming {
   duration: number;
 }
 
+export interface GuestHost {
+  id: string;
+  name: string;
+  role: string;
+  gender: 'male' | 'female';
+  voice: string;
+  customSamples: CustomAudioSample[];
+}
+
 export interface Episode {
   id: string;
   title: string;
@@ -34,12 +44,7 @@ export interface Episode {
   samanthaCustomSamples: CustomAudioSample[];
   stewardVoice: string;
   stewardCustomSamples: CustomAudioSample[];
-  isThirdHostEnabled: boolean;
-  thirdHostName: string;
-  thirdHostRole: string;
-  thirdHostGender: 'male' | 'female';
-  thirdHostVoice: string;
-  thirdHostCustomSamples: CustomAudioSample[];
+  guestHosts: GuestHost[];
   // Step 2 state
   prompt: string;
   pdfText: string;
@@ -56,7 +61,6 @@ export interface Episode {
   website: string;
   slogan: string;
   backgroundSound: string;
-  backgroundVolume: number;
   // Step 4 state
   audioData: string | null;
   adText?: string | null;
@@ -65,7 +69,7 @@ export interface Episode {
 
 export type EffectType = 'volume' | 'noise' | 'speed';
 
+// FIX: Added missing ApiKey interface to resolve import error in apiKeyService.ts
 export interface ApiKey {
   key: string;
-  isActive: boolean;
 }

@@ -1,21 +1,18 @@
 import React, { useState, useRef, useCallback, PropsWithChildren, useEffect } from 'react';
-import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, ApiKey } from './types';
+import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, GuestHost } from './types';
 import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice, generateQualityPreviewAudio, generateAdText, generateAdScript } from './services/geminiService';
 import { extractTextFromPdf } from './services/pdfService';
-import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence, mixAudio } from './utils/audioUtils';
-// FIX: Added WandIcon to imports
-import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, SettingsIcon, KeyIcon, FolderIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, WorkflowIllustration, VoiceCloningIllustration, AiScriptingIllustration, EditingSuiteIllustration, WandIcon } from './components/Icons';
-import { useFileSystem } from './hooks/useFileSystem';
-import * as apiKeyService from './services/apiKeyService';
-import { BACKGROUND_AUDIO } from './assets/backgroundAudio';
+import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence } from './utils/audioUtils';
+import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, DotsIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon } from './components/Icons';
 
-
-type Speaker = 'samantha' | 'steward' | 'thirdHost';
-// FIX: Removed 'settings' as the component is not implemented, simplifying the scope.
 type ActiveTab = 'creator' | 'editor' | 'about';
 
 const Logo = () => (
     <div className="relative flex items-center justify-center" aria-label="Brands by Ai">
+        {/* Spotlight Effect */}
+        <div 
+            
+        />
         <img 
             src="https://i.ibb.co/zHWF2Hc2/90378e8b-4c88-4160-860d-4d510bdded49.png" 
             alt="Brands by Ai company logo" 
@@ -71,23 +68,23 @@ const StepIndicator: React.FC<{ currentStep: number }> = ({ currentStep }) => {
 };
 
 const HostEditorCard: React.FC<PropsWithChildren<{
+  id: string;
   name: string;
   setName: (name: string) => void;
   voice: string;
   setVoice: (voice: string) => void;
   voiceOptions: { name: string; label: string; }[];
-  speakerKey: Speaker;
-  handlePreviewVoice: (speaker: Speaker) => void;
+  handlePreviewVoice: (id: string) => void;
   isPreviewing: boolean;
   customSamples: CustomAudioSample[];
-  handleToggleRecording: (speaker: Speaker) => void;
+  handleToggleRecording: (id: string) => void;
   isRecording: boolean;
   audioFileInputRef: React.RefObject<HTMLInputElement>;
-  handleAudioFileChange: (event: React.ChangeEvent<HTMLInputElement>, speaker: Speaker) => void;
-  handleRemoveCustomAudio: (speaker: Speaker, index: number) => void;
-  handlePreviewCustomVoice: (speaker: Speaker) => void;
+  handleAudioFileChange: (event: React.ChangeEvent<HTMLInputElement>, id: string) => void;
+  handleRemoveCustomAudio: (id: string, index: number) => void;
+  handlePreviewCustomVoice: (id: string) => void;
   isPreviewingCustom: boolean;
-}>> = ({ name, setName, voice, setVoice, voiceOptions, speakerKey, handlePreviewVoice, isPreviewing, customSamples, handleToggleRecording, isRecording, audioFileInputRef, handleAudioFileChange, handleRemoveCustomAudio, handlePreviewCustomVoice, isPreviewingCustom, children }) => {
+}>> = ({ id, name, setName, voice, setVoice, voiceOptions, handlePreviewVoice, isPreviewing, customSamples, handleToggleRecording, isRecording, audioFileInputRef, handleAudioFileChange, handleRemoveCustomAudio, handlePreviewCustomVoice, isPreviewingCustom, children }) => {
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 space-y-6">
       <input type="text" placeholder="Host Name" value={name} onChange={(e) => setName(e.target.value)} className="w-full text-xl bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-3 focus:outline-none focus:border-gold transition font-serif font-bold" />
@@ -98,7 +95,7 @@ const HostEditorCard: React.FC<PropsWithChildren<{
             <select value={voice} onChange={(e) => setVoice(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition disabled:opacity-50 appearance-none" disabled={customSamples.length > 0}>
                 {voiceOptions.map((v, index) => <option key={`${v.name}-${index}`} value={v.name}>{v.label}</option>)}
             </select>
-            <button onClick={() => handlePreviewVoice(speakerKey)} disabled={isPreviewing || customSamples.length > 0} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition flex-shrink-0">
+            <button onClick={() => handlePreviewVoice(id)} disabled={isPreviewing || customSamples.length > 0} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition flex-shrink-0">
               {isPreviewing ? <LoaderIcon /> : <PlayCircleIcon />}
             </button>
         </div>
@@ -120,7 +117,7 @@ const HostEditorCard: React.FC<PropsWithChildren<{
                         <span className="truncate text-sm font-semibold flex-1 min-w-0 px-2">{sample.name}</span>
                         <div className="flex items-center gap-2 flex-shrink-0">
                             <button onClick={() => new Audio(sample.url).play()} className="p-2 bg-zinc-700 rounded-full hover:bg-zinc-600 disabled:opacity-50 transition"><PlayCircleIcon /></button>
-                            <button onClick={() => handleRemoveCustomAudio(speakerKey, index)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition"><TrashIcon /></button>
+                            <button onClick={() => handleRemoveCustomAudio(id, index)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition"><TrashIcon /></button>
                         </div>
                     </div>
                 ))}
@@ -128,17 +125,17 @@ const HostEditorCard: React.FC<PropsWithChildren<{
         )}
 
         <div className="flex gap-4">
-            <button onClick={() => handleToggleRecording(speakerKey)} disabled={customSamples.length >= 5} className={`w-full flex items-center justify-center gap-3 border-2 border-zinc-700 rounded-lg p-4 transition disabled:opacity-50 disabled:cursor-not-allowed ${isRecording ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent hover:border-gold'}`}>
+            <button onClick={() => handleToggleRecording(id)} disabled={customSamples.length >= 5} className={`w-full flex items-center justify-center gap-3 border-2 border-zinc-700 rounded-lg p-4 transition disabled:opacity-50 disabled:cursor-not-allowed ${isRecording ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent hover:border-gold'}`}>
                 <MicIcon /> {isRecording ? 'Stop' : 'Record'}
             </button>
-            <input type="file" accept="audio/*" ref={audioFileInputRef} onChange={(e) => handleAudioFileChange(e, speakerKey)} className="hidden" />
+            <input type="file" accept="audio/*" ref={audioFileInputRef} onChange={(e) => handleAudioFileChange(e, id)} className="hidden" />
             <button onClick={() => audioFileInputRef.current?.click()} disabled={customSamples.length >= 5} className="w-full flex items-center justify-center gap-3 bg-transparent border-2 border-zinc-700 rounded-lg p-4 hover:border-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
                 <UploadIcon /> Upload
             </button>
         </div>
         
         {customSamples.length > 0 && (
-             <button onClick={() => handlePreviewCustomVoice(speakerKey)} disabled={isPreviewingCustom} className="w-full flex items-center justify-center gap-3 bg-gold/10 border-2 border-gold rounded-lg p-4 hover:bg-gold/20 text-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
+             <button onClick={() => handlePreviewCustomVoice(id)} disabled={isPreviewingCustom} className="w-full flex items-center justify-center gap-3 bg-gold/10 border-2 border-gold rounded-lg p-4 hover:bg-gold/20 text-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
                 {isPreviewingCustom ? <LoaderIcon/> : <VolumeHighIcon/>} Preview Cloned Voice
             </button>
         )}
@@ -159,20 +156,9 @@ interface StepHostsProps {
   setSamanthaVoice: (voice: string) => void;
   stewardVoice: string;
   setStewardVoice: (voice: string) => void;
-  isThirdHostEnabled: boolean;
-  setIsThirdHostEnabled: (enabled: boolean) => void;
-  thirdHostName: string;
-  setThirdHostName: (name: string) => void;
-  thirdHostRole: string;
-  setThirdHostRole: (role: string) => void;
-  thirdHostGender: 'male' | 'female';
-  setThirdHostGender: (gender: 'male' | 'female') => void;
-  thirdHostVoice: string;
-  setThirdHostVoice: (voice: string) => void;
   isPreviewingSamantha: boolean;
   isPreviewingSteward: boolean;
-  isPreviewingThirdHost: boolean;
-  handlePreviewVoice: (speaker: Speaker) => void;
+  handlePreviewVoice: (id: string) => void;
   femaleVoices: { name: string; label: string; }[];
   maleVoices: { name: string; label: string; }[];
   areHostsValid: () => boolean;
@@ -185,31 +171,31 @@ interface StepHostsProps {
   isPreviewingStewardCustom: boolean;
   isRecordingSteward: boolean;
   stewardAudioFileInputRef: React.RefObject<HTMLInputElement>;
-  thirdHostCustomSamples: CustomAudioSample[];
-  isPreviewingThirdHostCustom: boolean;
-  isRecordingThirdHost: boolean;
-  thirdHostAudioFileInputRef: React.RefObject<HTMLInputElement>;
-  handlePreviewCustomVoice: (speaker: Speaker) => void;
-  handleRemoveCustomAudio: (speaker: Speaker, index: number) => void;
-  handleToggleRecording: (speaker: Speaker) => void;
-  handleAudioFileChange: (event: React.ChangeEvent<HTMLInputElement>, speaker: Speaker) => void;
+  handlePreviewCustomVoice: (id: string) => void;
+  handleRemoveCustomAudio: (id: string, index: number) => void;
+  handleToggleRecording: (id: string) => void;
+  handleAudioFileChange: (event: React.ChangeEvent<HTMLInputElement>, id: string) => void;
   isPreviewingQuality: boolean;
   handlePreviewQuality: () => void;
+  // Guest props
+  guestHosts: GuestHost[];
+  handleAddGuest: () => void;
+  handleRemoveGuest: (id: string) => void;
+  handleUpdateGuest: (id: string, field: keyof Omit<GuestHost, 'id' | 'customSamples'>, value: any) => void;
+  guestStates: { [id: string]: { isRecording: boolean; isPreviewing: boolean; isPreviewingCustom: boolean } };
+  guestAudioFileInputRefs: React.MutableRefObject<{ [id: string]: React.RefObject<HTMLInputElement> }>;
 }
 
 const StepHosts: React.FC<StepHostsProps> = ({
   error, setError, samanthaName, setSamanthaName, stewardName, setStewardName,
   samanthaVoice, setSamanthaVoice, stewardVoice, setStewardVoice,
-  isThirdHostEnabled, setIsThirdHostEnabled, thirdHostName, setThirdHostName,
-  thirdHostRole, setThirdHostRole, thirdHostGender, setThirdHostGender,
-  thirdHostVoice, setThirdHostVoice, isPreviewingSamantha, isPreviewingSteward,
-  isPreviewingThirdHost, handlePreviewVoice, femaleVoices, maleVoices,
-  areHostsValid, setCurrentStep, 
+  isPreviewingSamantha, isPreviewingSteward, handlePreviewVoice, 
+  femaleVoices, maleVoices, areHostsValid, setCurrentStep, 
   samanthaCustomSamples, isPreviewingSamanthaCustom, isRecordingSamantha, samanthaAudioFileInputRef,
   stewardCustomSamples, isPreviewingStewardCustom, isRecordingSteward, stewardAudioFileInputRef,
-  thirdHostCustomSamples, isPreviewingThirdHostCustom, isRecordingThirdHost, thirdHostAudioFileInputRef, 
   handlePreviewCustomVoice, handleRemoveCustomAudio, handleToggleRecording, handleAudioFileChange,
-  isPreviewingQuality, handlePreviewQuality
+  isPreviewingQuality, handlePreviewQuality,
+  guestHosts, handleAddGuest, handleRemoveGuest, handleUpdateGuest, guestStates, guestAudioFileInputRefs,
 }) => (
   <Card title="I: Define Your Hosts" className="max-w-6xl mx-auto">
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -226,10 +212,10 @@ const StepHosts: React.FC<StepHostsProps> = ({
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <HostEditorCard
+              id="samantha"
               name={samanthaName} setName={setSamanthaName}
               voice={samanthaVoice} setVoice={setSamanthaVoice}
               voiceOptions={femaleVoices}
-              speakerKey="samantha"
               handlePreviewVoice={handlePreviewVoice} isPreviewing={isPreviewingSamantha}
               customSamples={samanthaCustomSamples}
               handleToggleRecording={handleToggleRecording} isRecording={isRecordingSamantha}
@@ -240,10 +226,10 @@ const StepHosts: React.FC<StepHostsProps> = ({
               isPreviewingCustom={isPreviewingSamanthaCustom}
           />
           <HostEditorCard
+              id="steward"
               name={stewardName} setName={setStewardName}
               voice={stewardVoice} setVoice={setStewardVoice}
               voiceOptions={maleVoices}
-              speakerKey="steward"
               handlePreviewVoice={handlePreviewVoice} isPreviewing={isPreviewingSteward}
               customSamples={stewardCustomSamples}
               handleToggleRecording={handleToggleRecording} isRecording={isRecordingSteward}
@@ -253,47 +239,59 @@ const StepHosts: React.FC<StepHostsProps> = ({
               handlePreviewCustomVoice={handlePreviewCustomVoice}
               isPreviewingCustom={isPreviewingStewardCustom}
           />
-      </div>
 
-      <div className="space-y-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 transition-all duration-300">
-        <div className="flex justify-between items-center">
-          <h3 className="text-xl font-serif font-bold text-text-primary">Add Guest Speaker</h3>
-          <label htmlFor="third-host-toggle" className="flex items-center cursor-pointer">
-            <div className="relative"><input id="third-host-toggle" type="checkbox" className="sr-only" checked={isThirdHostEnabled} onChange={() => setIsThirdHostEnabled(!isThirdHostEnabled)} /><div className="block bg-zinc-700 w-12 h-7 rounded-full"></div><div className={`dot absolute left-1 top-1 bg-white w-5 h-5 rounded-full transition-transform ${isThirdHostEnabled ? 'translate-x-full bg-gold' : ''}`}></div></div>
-          </label>
+        <div className="lg:col-span-2 space-y-8">
+          {guestHosts.map((guest, index) => (
+            <div key={guest.id} className="relative bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 pt-12 animate-fade-in-scale">
+                <button
+                    onClick={() => handleRemoveGuest(guest.id)}
+                    className="absolute top-4 right-4 text-red-400 hover:bg-red-500/20 rounded-full p-2 transition"
+                    aria-label="Remove guest"
+                >
+                    <TrashIcon />
+                </button>
+                <h3 className="absolute top-4 left-6 text-xl font-serif font-bold text-text-primary">Guest Speaker #{index + 1}</h3>
+                <HostEditorCard
+                    id={guest.id}
+                    name={guest.name} 
+                    setName={(name) => handleUpdateGuest(guest.id, 'name', name)}
+                    voice={guest.voice} 
+                    setVoice={(voice) => handleUpdateGuest(guest.id, 'voice', voice)}
+                    voiceOptions={guest.gender === 'female' ? femaleVoices : maleVoices}
+                    handlePreviewVoice={handlePreviewVoice} 
+                    isPreviewing={guestStates[guest.id]?.isPreviewing || false}
+                    customSamples={guest.customSamples}
+                    handleToggleRecording={handleToggleRecording} 
+                    isRecording={guestStates[guest.id]?.isRecording || false}
+                    audioFileInputRef={guestAudioFileInputRefs.current[guest.id]}
+                    handleAudioFileChange={handleAudioFileChange}
+                    handleRemoveCustomAudio={handleRemoveCustomAudio}
+                    handlePreviewCustomVoice={handlePreviewCustomVoice}
+                    isPreviewingCustom={guestStates[guest.id]?.isPreviewingCustom || false}
+                >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div>
+                            <label className="block text-sm font-bold text-text-primary tracking-wider mb-2">GUEST ROLE</label>
+                            <input type="text" placeholder="e.g., Expert" value={guest.role} onChange={(e) => handleUpdateGuest(guest.id, 'role', e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-text-primary tracking-wider mb-2">GUEST GENDER</label>
+                            <select value={guest.gender} onChange={(e) => handleUpdateGuest(guest.id, 'gender', e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
+                                <option value="male">Male</option>
+                                <option value="female">Female</option>
+                            </select>
+                        </div>
+                    </div>
+                </HostEditorCard>
+            </div>
+          ))}
+          <button
+              onClick={handleAddGuest}
+              className="w-full bg-transparent border-2 border-dashed border-zinc-700 rounded-lg p-6 text-text-secondary hover:border-gold hover:text-gold transition flex items-center justify-center gap-3"
+          >
+              <PlusIcon /> Add Guest Speaker
+          </button>
         </div>
-        {isThirdHostEnabled && (
-          <div className="space-y-8 pt-6 border-t border-zinc-800 animate-fade-in-scale">
-             <HostEditorCard
-                name={thirdHostName} setName={setThirdHostName}
-                voice={thirdHostVoice} setVoice={setThirdHostVoice}
-                voiceOptions={thirdHostGender === 'female' ? femaleVoices : maleVoices}
-                speakerKey="thirdHost"
-                handlePreviewVoice={handlePreviewVoice} isPreviewing={isPreviewingThirdHost}
-                customSamples={thirdHostCustomSamples}
-                handleToggleRecording={handleToggleRecording} isRecording={isRecordingThirdHost}
-                audioFileInputRef={thirdHostAudioFileInputRef}
-                handleAudioFileChange={handleAudioFileChange}
-                handleRemoveCustomAudio={handleRemoveCustomAudio}
-                handlePreviewCustomVoice={handlePreviewCustomVoice}
-                isPreviewingCustom={isPreviewingThirdHostCustom}
-             >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <div>
-                        <label className="block text-sm font-bold text-text-primary tracking-wider mb-2">GUEST ROLE</label>
-                        <input type="text" placeholder="e.g., Expert" value={thirdHostRole} onChange={(e) => setThirdHostRole(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-text-primary tracking-wider mb-2">GUEST GENDER</label>
-                        <select value={thirdHostGender} onChange={(e) => setThirdHostGender(e.target.value as any)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
-                            <option value="male">Male</option>
-                            <option value="female">Female</option>
-                        </select>
-                    </div>
-                </div>
-            </HostEditorCard>
-          </div>
-        )}
       </div>
 
       <div className="pt-8 border-t border-zinc-800 flex justify-end">
@@ -484,60 +482,13 @@ interface StepScriptAndAudioProps {
   setScript: (script: ScriptLine[]) => void;
   setCurrentStep: (step: number) => void;
   handleGenerateAudio: () => void;
-  backgroundSound: string;
-  setBackgroundSound: (sound: string) => void;
-  backgroundVolume: number;
-  setBackgroundVolume: (volume: number) => void;
 }
 
 const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
   error, isLoadingAudio, brandedName, setBrandedName, contactDetails, setContactDetails, website,
-  setWebsite, slogan, setSlogan, script, setScript, setCurrentStep, handleGenerateAudio,
-  backgroundSound, setBackgroundSound, backgroundVolume, setBackgroundVolume
+  setWebsite, slogan, setSlogan, script, setScript, setCurrentStep, handleGenerateAudio
 }) => {
     const [isEditing, setIsEditing] = useState(false);
-    const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
-    const [isPreviewing, setIsPreviewing] = useState(false);
-
-    const handlePreviewBackground = () => {
-        if (audioPreviewRef.current) {
-            audioPreviewRef.current.pause();
-            audioPreviewRef.current = null;
-            setIsPreviewing(false);
-            return;
-        }
-
-        const track = BACKGROUND_AUDIO[backgroundSound];
-        if (!track) return;
-        
-        const audio = new Audio(`data:audio/wav;base64,${track.data}`);
-        audio.loop = true;
-        audio.volume = backgroundVolume;
-        audio.play();
-        audioPreviewRef.current = audio;
-        setIsPreviewing(true);
-
-        audio.onpause = () => {
-             setIsPreviewing(false);
-             audioPreviewRef.current = null;
-        }
-    };
-
-    useEffect(() => {
-        // Stop preview when component unmounts
-        return () => {
-            if (audioPreviewRef.current) {
-                audioPreviewRef.current.pause();
-            }
-        };
-    }, []);
-
-    useEffect(() => {
-        if (audioPreviewRef.current) {
-            audioPreviewRef.current.volume = backgroundVolume;
-        }
-    }, [backgroundVolume]);
-
     if (!script) return null;
 
     return (
@@ -553,31 +504,13 @@ const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
                 ) : (
                     <Card title="III: Finalize & Generate">
                         <div className="space-y-8">
-                          <div>
-                            <label className="block text-md font-bold text-text-primary mb-2">Background Audio</label>
-                            <div className="flex gap-4 items-center">
-                                <select value={backgroundSound} onChange={(e) => setBackgroundSound(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
-                                    <option value="none">None</option>
-                                    {Object.entries(BACKGROUND_AUDIO).map(([key, track]) => (
-                                        <option key={key} value={key}>{track.name}</option>
-                                    ))}
-                                </select>
-                                <button onClick={handlePreviewBackground} disabled={backgroundSound === 'none'} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition flex-shrink-0">
-                                    {isPreviewing ? <PauseIcon /> : <PlayIcon />}
-                                </button>
-                            </div>
-                            {backgroundSound !== 'none' && (
-                                <div className="mt-4 flex items-center gap-3">
-                                    <VolumeMuteIcon />
-                                    <input type="range" min="0" max="0.5" step="0.01" value={backgroundVolume} onChange={(e) => setBackgroundVolume(parseFloat(e.target.value))} className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold"/>
-                                    <VolumeHighIcon />
-                                </div>
-                            )}
-                          </div>
                             <input type="text" placeholder="Branded Name (e.g., Brands by AI)" value={brandedName} onChange={(e) => setBrandedName(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Contact Details (e.g., email)" value={contactDetails} onChange={(e) => setContactDetails(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Website (e.g., yoursite.com)" value={website} onChange={(e) => setWebsite(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Slogan" value={slogan} onChange={(e) => setSlogan(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
+                        </div>
+                         <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg text-center text-sm text-text-secondary">
+                            <p>To enable advanced features like interactive script playback, background audio is not available at this step.</p>
                         </div>
                         <div className="pt-8 border-t border-zinc-800 flex justify-between items-center">
                             <button onClick={() => { setScript([]); setCurrentStep(2); }} className="font-bold py-4 px-10 rounded-lg hover:bg-zinc-800 transition flex items-center gap-2 text-lg">
@@ -728,7 +661,7 @@ const StepStudio: React.FC<StepStudioProps> = ({
         if (!audioData) return;
         
         const rawData = decode(audioData);
-        const pcm = new Int16Array(rawData.buffer, rawData.byteOffset, rawData.length / 2);
+        const pcm = new Int16Array(rawData.buffer);
         const channelData = new Float32Array(pcm.length);
         for (let i = 0; i < pcm.length; i++) {
             channelData[i] = pcm[i] / 32768.0;
@@ -1096,69 +1029,561 @@ const Footer: React.FC<{ onCreatorClick: () => void }> = ({ onCreatorClick }) =>
     );
 };
 
-const AboutTab = () => {
-    return (
-        <div className="max-w-4xl mx-auto py-12 px-4 sm:px-0 fade-in">
-            <Card title="About AI Podcast Studio" icon={<InfoIcon />}>
-                <div className="prose prose-invert prose-lg text-text-secondary space-y-8">
-                    <p className="text-xl">
-                        Welcome to the <span className="text-gold font-bold">AI Podcast Studio</span>, a comprehensive suite of tools designed to take your podcast from a simple idea to a fully produced episode, all with the power of cutting-edge generative AI.
-                    </p>
+export default function App() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('creator');
+  const [currentStep, setCurrentStep] = useState(1);
+  
+  // Step 1
+  const [samanthaName, setSamanthaName] = useState('Samantha');
+  const [stewardName, setStewardName] = useState('Steward');
+  const [samanthaVoice, setSamanthaVoice] = useState<string>('Kore');
+  const [samanthaCustomSamples, setSamanthaCustomSamples] = useState<CustomAudioSample[]>([]);
+  const [isRecordingSamantha, setIsRecordingSamantha] = useState<boolean>(false);
+  const [isPreviewingSamantha, setIsPreviewingSamantha] = useState(false);
+  const [isPreviewingSamanthaCustom, setIsPreviewingSamanthaCustom] = useState(false);
+  const samanthaAudioFileInputRef = useRef<HTMLInputElement>(null);
+  const [stewardVoice, setStewardVoice] = useState<string>('Fenrir');
+  const [stewardCustomSamples, setStewardCustomSamples] = useState<CustomAudioSample[]>([]);
+  const [isRecordingSteward, setIsRecordingSteward] = useState<boolean>(false);
+  const [isPreviewingSteward, setIsPreviewingSteward] = useState(false);
+  const [isPreviewingStewardCustom, setIsPreviewingStewardCustom] = useState(false);
+  const stewardAudioFileInputRef = useRef<HTMLInputElement>(null);
+  const [guestHosts, setGuestHosts] = useState<GuestHost[]>([]);
+  const [guestStates, setGuestStates] = useState<{[id: string]: { isRecording: boolean; isPreviewing: boolean; isPreviewingCustom: boolean }}>({});
+  const guestAudioFileInputRefs = useRef<{ [id: string]: React.RefObject<HTMLInputElement> }>({});
+  const [isPreviewingQuality, setIsPreviewingQuality] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
-                    <div className="border-t border-zinc-700 pt-6">
-                        <h3 className="text-2xl text-text-primary font-serif mb-4">How It Works: A Step-by-Step Guide</h3>
-                        <p>The studio guides you through a simple, four-step process:</p>
-                        <ol className="list-decimal list-inside space-y-2">
-                            <li><strong>I: Define Your Hosts:</strong> Choose from hyper-realistic pre-built voices or clone your own by providing short audio samples. This step sets the personality of your show.</li>
-                            <li><strong>II: Content & AI Rules:</strong> This is where your story begins. Provide a topic, upload a PDF for context, or even paste in a draft script. You can add custom rules to guide the AI's writing style.</li>
-                            <li><strong>III: Finalize & Generate:</strong> Review the AI-generated script. You can edit the dialogue to perfection before moving on to the main event: audio generation.</li>
-                            <li><strong>IV: Production Studio:</strong> Listen to your fully generated podcast! Use the built-in editor to make final touches, then download your episode or generate promotional content.</li>
-                        </ol>
-                    </div>
+  // Step 2
+  const [episodeTitle, setEpisodeTitle] = useState('');
+  const [episodeNumber, setEpisodeNumber] = useState(1);
+  const [episodeLength, setEpisodeLength] = useState(10);
+  const [prompt, setPrompt] = useState<string>('');
+  const [pdfText, setPdfText] = useState<string>('');
+  const [fileName, setFileName] = useState<string>('');
+  const [manualScriptText, setManualScriptText] = useState<string>('');
+  const [customRules, setCustomRules] = useState<string>('');
+  const [language, setLanguage] = useState<'English' | 'Afrikaans'>('English');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Step 3
+  const [script, setScript] = useState<ScriptLine[] | null>(null);
+  const [brandedName, setBrandedName] = useState('Brands by Ai');
+  const [contactDetails, setContactDetails] = useState('');
+  const [website, setWebsite] = useState('');
+  const [slogan, setSlogan] = useState('');
+  
+  // Step 4
+  const [audioData, setAudioData] = useState<string | null>(null);
+  const [scriptTimings, setScriptTimings] = useState<ScriptTiming[] | null>(null);
+  const [areTimingsStale, setAreTimingsStale] = useState<boolean>(false);
+  const [adText, setAdText] = useState<string | null>(null);
+  const [adScript, setAdScript] = useState<string | null>(null);
 
-                    <div className="border-t border-zinc-700 pt-6">
-                        <h3 className="text-2xl text-text-primary font-serif mb-4">Key Features in Detail</h3>
-                        
-                        <div className="p-4 bg-zinc-900/50 rounded-lg">
-                            <h4 className="text-xl text-gold font-semibold">Hyper-Realistic Voices & Interruptions</h4>
-                            <p>Our AI doesn't just read lines; it performs them. It generates natural, conversational dialogue that sounds truly human. The secret is in the details: realistic pacing, emotional cues, and—most importantly—natural interruptions. This prevents the "turn-by-turn" feel of older text-to-speech, creating a dynamic and engaging listening experience.</p>
-                        </div>
-                        
-                        <div className="p-4 mt-4 bg-zinc-900/50 rounded-lg">
-                             <h4 className="text-xl text-gold font-semibold">Voice Cloning</h4>
-                            <p>Make your podcast uniquely yours. Instead of using pre-built voices, you can provide audio samples to create a custom voice clone for any host. The AI analyzes the unique characteristics of the voice—pitch, tone, and cadence—to create a digital model that can speak any line you give it.</p>
-                        </div>
+  // Episode Management
+  const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [loadedEpisodeId, setLoadedEpisodeId] = useState<string | null>(null);
 
-                         <div className="p-4 mt-4 bg-zinc-900/50 rounded-lg">
-                             <h4 className="text-xl text-gold font-semibold">Intelligent Scripting from Any Source</h4>
-                            <p>Whether you have a fully formed idea or just a spark, the AI can help. It can generate a complete script from a simple topic, a detailed research paper in PDF format, or even polish and expand upon a rough draft you provide.</p>
-                             <p className="mt-2 text-sm italic"><strong>Example:</strong> Simply providing the topic "The history of coffee" and a 10-minute length can yield a full conversational script, complete with an intro, main discussion points, and an outro.</p>
-                        </div>
-                        
-                        <div className="p-4 mt-4 bg-zinc-900/50 rounded-lg">
-                             <h4 className="text-xl text-gold font-semibold">The Production Studio & Waveform Editor</h4>
-                            <p>Once your audio is generated, you enter the Production Studio. Here you'll see a visual representation of your audio—the waveform. You can play, pause, and listen to the final product. With the integrated Audio Editor, you can select parts of the waveform to make precise edits.</p>
-                             <p className="mt-2">Use the <span className="font-mono text-gold bg-zinc-800 px-1 rounded">Zoom Slider</span> to get a closer look at the audio, allowing you to trim silence, cut mistakes, or apply fades with pinpoint accuracy.</p>
-                        </div>
-                    </div>
+  // Global
+  const [isLoadingScript, setIsLoadingScript] = useState<boolean>(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState<boolean>(false);
+  const [error, setError] = useState<string>('');
+  const [isCreatorPopupVisible, setIsCreatorPopupVisible] = useState(false);
 
-                    <div className="border-t border-zinc-700 pt-6">
-                         <h3 className="text-2xl text-text-primary font-serif mb-4">Tips for Best Results</h3>
-                        <ul className="list-disc pl-5 space-y-2">
-                            <li><strong>For Voice Cloning:</strong> Record in a quiet environment with no background noise. Speak clearly and naturally for at least 10-15 seconds. The more clean audio you provide (up to 5 samples), the better the clone will be.</li>
-                            <li><strong>For Scripting:</strong> Be specific in your prompts. Instead of "AI," try "The impact of generative AI on creative industries." Use the "Advanced AI Rules" to guide the tone, like "Keep the tone light and humorous" or "Avoid technical jargon."</li>
-                            <li><strong>For Editing:</strong> Use headphones to catch small details in the audio. Zoom in on the waveform before making a cut to ensure you're not clipping the beginning or end of a word.</li>
-                        </ul>
-                    </div>
+  const femaleVoices = [
+      { name: 'Kore', label: 'Twitch Streamer (Female, Energetic)' },
+      { name: 'Kore', label: 'Kore (Female, Clear & Professional)' },
+      { name: 'Charon', label: 'Charon (Female, Warm & Raspy)' },
+  ];
+  const maleVoices = [
+      { name: 'Puck', label: 'Twitch Streamer (Male, Expressive)' },
+      { name: 'Fenrir', label: 'Fenrir (Male, Deep & Resonant)' },
+      { name: 'Puck', label: 'Puck (Male, Warm & Engaging)' },
+      { name: 'Zephyr', label: 'Zephyr (Male, Crisp & Professional)' },
+  ];
+  
+  const resetState = (isNewEpisode: boolean = false) => {
+      setPrompt(''); setPdfText(''); setFileName(''); setManualScriptText('');
+      setCustomRules(''); setLanguage('English');
+      setSamanthaName('Samantha'); setStewardName('Steward');
+      setSamanthaVoice('Kore'); setSamanthaCustomSamples([]);
+      setStewardVoice('Fenrir'); setStewardCustomSamples([]);
+      setGuestHosts([]); setGuestStates({});
+      setScript(null); setAudioData(null); setScriptTimings(null);
+      setBrandedName('Brands by Ai'); setContactDetails(''); setWebsite(''); setSlogan('');
+      setError(''); setIsLoadingScript(false); setIsLoadingAudio(false);
+      setAreTimingsStale(false); setAdText(null); setAdScript(null);
+      
+      if (isNewEpisode) {
+        setLoadedEpisodeId(null);
+        setEpisodeTitle('');
+        setEpisodeLength(10);
+        if (episodes.length > 0) {
+            const maxEpNum = Math.max(...episodes.map(e => e.episodeNumber));
+            setEpisodeNumber(maxEpNum + 1);
+        } else {
+            setEpisodeNumber(1);
+        }
+      }
+  };
 
-                    <p>This application is designed to streamline the entire podcast creation workflow, giving you professional-grade tools in a simple, intuitive interface. Happy podcasting!</p>
-                </div>
-            </Card>
+  const handleStartOver = () => {
+    resetState(true);
+    setCurrentStep(1);
+  };
+  
+  useEffect(() => {
+    try {
+        const savedEpisodes = localStorage.getItem('podcastEpisodes');
+        if (savedEpisodes) {
+            const parsed = JSON.parse(savedEpisodes);
+            setEpisodes(parsed);
+            if (parsed.length > 0) {
+                const maxEpNum = Math.max(...parsed.map((e: Episode) => e.episodeNumber));
+                setEpisodeNumber(maxEpNum + 1);
+            }
+        }
+    } catch (error) {
+        console.error("Failed to load episodes from localStorage", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+        const storableEpisodes = episodes.map(ep => {
+            // Exclude large data strings to avoid exceeding localStorage quota.
+            const { audioData, samanthaCustomSamples, stewardCustomSamples, guestHosts, ...storableEpisode } = ep;
+            return { 
+                ...storableEpisode, 
+                audioData: null,
+                samanthaCustomSamples: [],
+                stewardCustomSamples: [],
+                guestHosts: guestHosts.map(g => ({...g, customSamples: []}))
+            };
+        });
+        localStorage.setItem('podcastEpisodes', JSON.stringify(storableEpisodes));
+    } catch (error) {
+        console.error("Failed to save episodes to localStorage", error);
+    }
+  }, [episodes]);
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setError(''); setFileName(file.name);
+      try {
+        setPdfText(await extractTextFromPdf(file));
+      } catch (e) {
+        setError("Failed to process PDF."); setFileName(''); setPdfText('');
+      }
+    }
+  };
+
+  const handleGenerateScript = useCallback(async () => {
+    if (!episodeTitle.trim() || episodeNumber <= 0) {
+        setError('Please provide an Episode Title and Number.'); setCurrentStep(2); return;
+    }
+    if (!prompt && !pdfText && !manualScriptText) {
+      setError('Please provide a topic, upload a PDF, or write a custom script.'); return;
+    }
+
+    setIsLoadingScript(true); setError(''); setScript(null); setAudioData(null); setScriptTimings(null);
+    
+    try {
+      const branding = { name: brandedName, contact: contactDetails, website, slogan };
+      const generatedScript = await generateScript( prompt, pdfText, branding, manualScriptText, customRules, language, samanthaName || 'Samantha', stewardName || 'Steward', guestHosts, 'South African', episodeTitle, episodeNumber, episodeLength );
+      setScript(generatedScript); setCurrentStep(3);
+    } catch (e: any) {
+      setError(`Failed to generate script: ${e.message}`);
+    } finally {
+      setIsLoadingScript(false);
+    }
+  }, [prompt, pdfText, brandedName, contactDetails, website, slogan, manualScriptText, customRules, language, samanthaName, stewardName, guestHosts, episodeTitle, episodeNumber, episodeLength]);
+  
+  const handleGenerateAudio = useCallback(async () => {
+    if (!script) { setError('No script available to generate audio.'); return; }
+    setIsLoadingAudio(true); setError(''); setAudioData(null); setScriptTimings(null); setAreTimingsStale(false);
+
+    try {
+        const getVoiceConfig = async (samples: CustomAudioSample[], prebuiltName: string): Promise<VoiceConfig> => {
+            if (samples.length > 0) {
+                const { data, mimeType } = await combineCustomAudioSamples(samples);
+                return { type: 'custom', data, mimeType };
+            }
+            return { type: 'prebuilt', name: prebuiltName };
+        };
+
+      const samanthaVoiceConfig = await getVoiceConfig(samanthaCustomSamples, samanthaVoice);
+      const stewardVoiceConfig = await getVoiceConfig(stewardCustomSamples, stewardVoice);
+      
+      const guestHostsPayload = await Promise.all(guestHosts.map(async (guest) => ({
+          name: guest.name,
+          voiceConfig: await getVoiceConfig(guest.customSamples, guest.voice),
+      })));
+
+      const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, guestHostsPayload, 'South African');
+      setAudioData(audioData); setScriptTimings(timings); setCurrentStep(4);
+    } catch (e: any) {
+      setError(`Failed to generate audio: ${e.message}`);
+      setCurrentStep(3);
+    } finally {
+      setIsLoadingAudio(false);
+    }
+  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, guestHosts, samanthaName, stewardName]);
+
+  const handleDownloadAudio = () => {
+    if (!audioData) return;
+    const rawData = decode(audioData);
+    const wavBlob = pcmToWav(rawData, 24000, 1, 16);
+    const url = URL.createObjectURL(wavBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `podcast_ep${episodeNumber}_${episodeTitle.replace(/\s+/g, '_')}.wav`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  
+  const handlePreviewVoice = useCallback(async (id: string) => {
+    let voiceName: string;
+    let setIsPreviewing: (val: boolean) => void;
+
+    if (id === 'samantha') {
+      voiceName = samanthaVoice;
+      setIsPreviewing = setIsPreviewingSamantha;
+    } else if (id === 'steward') {
+      voiceName = stewardVoice;
+      setIsPreviewing = setIsPreviewingSteward;
+    } else {
+      const guest = guestHosts.find(g => g.id === id);
+      if (!guest) return;
+      voiceName = guest.voice;
+      setIsPreviewing = (val) => setGuestStates(prev => ({...prev, [id]: { ...prev[id], isPreviewing: val }}));
+    }
+
+    setIsPreviewing(true);
+    setError('');
+    try {
+      const audioBase64 = await previewVoice(voiceName, language, 'South African');
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      const decodedData = decode(audioBase64);
+      const buffer = await customDecodeAudioData(decodedData, audioContext, 24000, 1);
+      const source = audioContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioContext.destination);
+      source.start();
+      source.onended = () => setIsPreviewing(false);
+    } catch (e: any) {
+      setError(`Failed to preview voice: ${e.message}`);
+      setIsPreviewing(false);
+    }
+  }, [samanthaVoice, stewardVoice, language, guestHosts]);
+
+
+  const handlePreviewQuality = async () => {
+    setIsPreviewingQuality(true); setError('');
+    try {
+        const audioBase64 = await generateQualityPreviewAudio(samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoice, stewardVoice, 'South African');
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+        const decodedData = decode(audioBase64);
+        const buffer = await customDecodeAudioData(decodedData, audioContext, 24000, 1);
+        const source = audioContext.createBufferSource();
+        source.buffer = buffer; source.connect(audioContext.destination); source.start();
+        source.onended = () => setIsPreviewingQuality(false);
+    } catch (e: any) {
+        setError(`Failed to generate quality preview: ${e.message}`); setIsPreviewingQuality(false);
+    }
+  };
+  
+  const handlePreviewCustomVoice = useCallback(async (id: string) => {
+    let customSamples: CustomAudioSample[];
+    let setIsPreviewing: (val: boolean) => void;
+
+    if (id === 'samantha') {
+      customSamples = samanthaCustomSamples;
+      setIsPreviewing = setIsPreviewingSamanthaCustom;
+    } else if (id === 'steward') {
+      customSamples = stewardCustomSamples;
+      setIsPreviewing = setIsPreviewingStewardCustom;
+    } else {
+      const guest = guestHosts.find(g => g.id === id);
+      if (!guest) return;
+      customSamples = guest.customSamples;
+      setIsPreviewing = (val) => setGuestStates(prev => ({...prev, [id]: { ...prev[id], isPreviewingCustom: val }}));
+    }
+    
+    if (customSamples.length === 0) return;
+
+    setIsPreviewing(true); setError('');
+    try {
+      const combinedSample = await combineCustomAudioSamples(customSamples);
+      const audioBase64 = await previewClonedVoice(combinedSample, language, 'South African');
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      const decodedData = decode(audioBase64);
+      const buffer = await customDecodeAudioData(decodedData, audioContext, 24000, 1);
+      const source = audioContext.createBufferSource();
+      source.buffer = buffer; source.connect(audioContext.destination); source.start();
+      source.onended = () => setIsPreviewing(false);
+    } catch (e: any) {
+      setError(`Failed to preview custom voice: ${e.message}`); setIsPreviewing(false);
+    }
+  }, [samanthaCustomSamples, stewardCustomSamples, guestHosts, language]);
+  
+  const handleToggleRecording = async (id: string) => {
+    const startRecording = async (setIsRecording: (val: boolean) => void, setSamples: (updater: (prev: CustomAudioSample[]) => CustomAudioSample[]) => void) => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+            mediaRecorderRef.current = mediaRecorder;
+            audioChunksRef.current = [];
+            mediaRecorder.ondataavailable = (event) => audioChunksRef.current.push(event.data);
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                try {
+                    const { base64, mimeType } = await import('./utils/audioUtils').then(m => m.processAudioForCloning(audioBlob));
+                    const url = `data:${mimeType};base64,${base64}`;
+                    const customAudio: CustomAudioSample = { url, base64, mimeType, name: `Recording ${new Date().toLocaleTimeString()}` };
+                    setSamples(prev => [...prev, customAudio]);
+                } catch (e: any) {
+                    setError(e.message || "Failed to process recording.");
+                } finally {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+            };
+            mediaRecorder.start();
+            setIsRecording(true);
+        } catch (e) {
+            setError("Could not access microphone.");
+        }
+    };
+
+    const stopRecording = (setIsRecording: (val: boolean) => void) => {
+        mediaRecorderRef.current?.stop();
+        setIsRecording(false);
+    };
+
+    if (id === 'samantha') {
+        if (samanthaCustomSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
+        isRecordingSamantha ? stopRecording(setIsRecordingSamantha) : startRecording(setIsRecordingSamantha, setSamanthaCustomSamples);
+    } else if (id === 'steward') {
+        if (stewardCustomSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
+        isRecordingSteward ? stopRecording(setIsRecordingSteward) : startRecording(setIsRecordingSteward, setStewardCustomSamples);
+    } else {
+        const guest = guestHosts.find(g => g.id === id);
+        const guestState = guestStates[id];
+        if (!guest || !guestState) return;
+        if (guest.customSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
+        
+        const setIsRecording = (val: boolean) => setGuestStates(prev => ({...prev, [id]: { ...prev[id], isRecording: val }}));
+        const setSamples = (updater: (prev: CustomAudioSample[]) => CustomAudioSample[]) => {
+            setGuestHosts(prev => prev.map(g => g.id === id ? { ...g, customSamples: updater(g.customSamples) } : g));
+        };
+        guestState.isRecording ? stopRecording(setIsRecording) : startRecording(setIsRecording, setSamples);
+    }
+  };
+  
+  const handleAudioFileChange = async (event: React.ChangeEvent<HTMLInputElement>, id: string) => {
+    const file = event.target.files?.[0];
+    if (file) {
+        const processFile = async (setSamples: (updater: (prev: CustomAudioSample[]) => CustomAudioSample[]) => void) => {
+            setError('');
+            try {
+                const { base64, mimeType } = await import('./utils/audioUtils').then(m => m.processAudioForCloning(file));
+                const url = `data:${mimeType};base64,${base64}`;
+                const customAudio: CustomAudioSample = { url, base64, mimeType, name: file.name };
+                setSamples(prev => [...prev, customAudio]);
+            } catch (e: any) {
+                setError(e.message || "Failed to read and process audio file.");
+            }
+        };
+
+        if (id === 'samantha') {
+            if (samanthaCustomSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
+            await processFile(setSamanthaCustomSamples);
+        } else if (id === 'steward') {
+            if (stewardCustomSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
+            await processFile(setStewardCustomSamples);
+        } else {
+            const guest = guestHosts.find(g => g.id === id);
+            if (!guest) return;
+            if (guest.customSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
+            const setSamples = (updater: (prev: CustomAudioSample[]) => CustomAudioSample[]) => {
+                setGuestHosts(prev => prev.map(g => g.id === id ? { ...g, customSamples: updater(g.customSamples) } : g));
+            };
+            await processFile(setSamples);
+        }
+    }
+    if (event.target) { event.target.value = ''; }
+  };
+  
+  const handleRemoveCustomAudio = (id: string, index: number) => {
+    if (id === 'samantha') setSamanthaCustomSamples(prev => prev.filter((_, i) => i !== index));
+    else if (id === 'steward') setStewardCustomSamples(prev => prev.filter((_, i) => i !== index));
+    else {
+        setGuestHosts(prev => prev.map(g => g.id === id ? {...g, customSamples: g.customSamples.filter((_, i) => i !== index)} : g));
+    }
+  };
+
+  const handleSaveOrUpdateEpisode = () => {
+    if (!episodeTitle.trim() || episodeNumber <= 0) { setError("Episode Title and Number are required to save."); return; }
+    const episodeData: Omit<Episode, 'id' | 'title' | 'episodeNumber'> = {
+        samanthaName, stewardName, samanthaVoice, samanthaCustomSamples, stewardVoice, stewardCustomSamples,
+        guestHosts, prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength,
+        script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound: 'none', audioData,
+        adText, adScript
+    };
+    if (loadedEpisodeId) {
+        setEpisodes(prev => prev.map(ep => ep.id === loadedEpisodeId ? { ...ep, ...episodeData, title: episodeTitle, episodeNumber } : ep));
+    } else {
+        const newId = `ep_${Date.now()}`;
+        setEpisodes(prev => [...prev, { ...episodeData, id: newId, title: episodeTitle, episodeNumber }]);
+        setLoadedEpisodeId(newId);
+    }
+    setError('');
+  };
+  
+  const handleLoadEpisode = (id: string) => {
+    if (!id) return;
+    const ep = episodes.find(e => e.id === id);
+    if (!ep) { setError("Could not find the selected episode to load."); return; }
+    setSamanthaName(ep.samanthaName); setStewardName(ep.stewardName);
+    setSamanthaVoice(ep.samanthaVoice); setSamanthaCustomSamples(ep.samanthaCustomSamples || []);
+    setStewardVoice(ep.stewardVoice); setStewardCustomSamples(ep.stewardCustomSamples || []);
+    
+    // Load guests
+    const loadedGuests = ep.guestHosts || [];
+    setGuestHosts(loadedGuests);
+    const newGuestStates = {};
+    const newGuestRefs = {};
+    loadedGuests.forEach(g => {
+        newGuestStates[g.id] = { isRecording: false, isPreviewing: false, isPreviewingCustom: false };
+        newGuestRefs[g.id] = React.createRef<HTMLInputElement>();
+    });
+    setGuestStates(newGuestStates);
+    guestAudioFileInputRefs.current = newGuestRefs;
+
+    setPrompt(ep.prompt); setPdfText(ep.pdfText); setFileName(ep.fileName);
+    setManualScriptText(ep.manualScriptText); setCustomRules(ep.customRules); setLanguage(ep.language); setEpisodeLength(ep.episodeLength || 10);
+    setScript(ep.script); setScriptTimings(ep.scriptTimings); setBrandedName(ep.brandedName);
+    setContactDetails(ep.contactDetails); setWebsite(ep.website); setSlogan(ep.slogan);
+    setAudioData(ep.audioData); setEpisodeTitle(ep.title); setEpisodeNumber(ep.episodeNumber);
+    setLoadedEpisodeId(ep.id);
+    setAdText(ep.adText || null); setAdScript(ep.adScript || null);
+    if (ep.audioData) setCurrentStep(4);
+    else if (ep.script) setCurrentStep(3);
+    else setCurrentStep(2);
+    setError('');
+  };
+
+  const areHostsValid = () => {
+    const mainHostsValid = samanthaName.trim() !== '' && stewardName.trim() !== '';
+    const guestsValid = guestHosts.every(g => g.name.trim() !== '' && g.role.trim() !== '');
+    return mainHostsValid && guestsValid;
+  };
+
+  const handleAddGuest = () => {
+      const newId = `guest_${Date.now()}`;
+      guestAudioFileInputRefs.current[newId] = React.createRef<HTMLInputElement>();
+      setGuestHosts(prev => [...prev, { id: newId, name: '', role: '', gender: 'male', voice: 'Zephyr', customSamples: [] }]);
+      setGuestStates(prev => ({ ...prev, [newId]: { isRecording: false, isPreviewing: false, isPreviewingCustom: false } }));
+  };
+
+  const handleRemoveGuest = (id: string) => {
+      setGuestHosts(prev => prev.filter(g => g.id !== id));
+      setGuestStates(prev => {
+          const newStates = {...prev};
+          delete newStates[id];
+          return newStates;
+      });
+      delete guestAudioFileInputRefs.current[id];
+  };
+
+  const handleUpdateGuest = (id: string, field: keyof Omit<GuestHost, 'id' | 'customSamples'>, value: any) => {
+      setGuestHosts(prev => prev.map(g => {
+          if (g.id === id) {
+              const updatedGuest = { ...g, [field]: value };
+              if (field === 'gender') {
+                  const isFemale = value === 'female';
+                  const currentVoiceIsFemale = femaleVoices.some(v => v.name === updatedGuest.voice);
+                  const currentVoiceIsMale = maleVoices.some(v => v.name === updatedGuest.voice);
+                  if (isFemale && !currentVoiceIsFemale) {
+                      updatedGuest.voice = 'Kore';
+                  } else if (!isFemale && !currentVoiceIsMale) {
+                      updatedGuest.voice = 'Zephyr';
+                  }
+              }
+              return updatedGuest;
+          }
+          return g;
+      }));
+  };
+
+  const renderCreatorContent = () => {
+    switch(currentStep) {
+      case 1: return <StepHosts error={error} setError={setError} samanthaName={samanthaName} setSamanthaName={setSamanthaName} stewardName={stewardName} setStewardName={setStewardName} samanthaVoice={samanthaVoice} setSamanthaVoice={setSamanthaVoice} stewardVoice={stewardVoice} setStewardVoice={setStewardVoice} isPreviewingSamantha={isPreviewingSamantha} isPreviewingSteward={isPreviewingSteward} handlePreviewVoice={handlePreviewVoice} femaleVoices={femaleVoices} maleVoices={maleVoices} areHostsValid={areHostsValid} setCurrentStep={setCurrentStep} samanthaCustomSamples={samanthaCustomSamples} isPreviewingSamanthaCustom={isPreviewingSamanthaCustom} isRecordingSamantha={isRecordingSamantha} samanthaAudioFileInputRef={samanthaAudioFileInputRef} stewardCustomSamples={stewardCustomSamples} isPreviewingStewardCustom={isPreviewingStewardCustom} isRecordingSteward={isRecordingSteward} stewardAudioFileInputRef={stewardAudioFileInputRef} handlePreviewCustomVoice={handlePreviewCustomVoice} handleRemoveCustomAudio={handleRemoveCustomAudio} handleToggleRecording={handleToggleRecording} handleAudioFileChange={handleAudioFileChange} isPreviewingQuality={isPreviewingQuality} handlePreviewQuality={handlePreviewQuality} guestHosts={guestHosts} handleAddGuest={handleAddGuest} handleRemoveGuest={handleRemoveGuest} handleUpdateGuest={handleUpdateGuest} guestStates={guestStates} guestAudioFileInputRefs={guestAudioFileInputRefs} />;
+      case 2: return <StepContent error={error} episodeTitle={episodeTitle} setEpisodeTitle={setEpisodeTitle} episodeNumber={episodeNumber} setEpisodeNumber={setEpisodeNumber} episodeLength={episodeLength} setEpisodeLength={setEpisodeLength} language={language} setLanguage={setLanguage} prompt={prompt} setPrompt={setPrompt} fileName={fileName} fileInputRef={fileInputRef} handleFileChange={handleFileChange} samanthaName={samanthaName} stewardName={stewardName} manualScriptText={manualScriptText} setManualScriptText={setManualScriptText} customRules={customRules} setCustomRules={setCustomRules} setCurrentStep={setCurrentStep} handleGenerateScript={handleGenerateScript} isLoadingScript={isLoadingScript} areContentInputsValid={() => !!(prompt || pdfText || manualScriptText)} />;
+      case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} />;
+      case 4: return script && audioData && scriptTimings ? <StepStudio audioData={audioData} setAudioData={setAudioData} script={script} scriptTimings={scriptTimings} handleDownloadAudio={handleDownloadAudio} handleStartOver={handleStartOver} handleSaveOrUpdateEpisode={handleSaveOrUpdateEpisode} loadedEpisodeId={loadedEpisodeId} areTimingsStale={areTimingsStale} setAreTimingsStale={setAreTimingsStale} adText={adText} setAdText={setAdText} adScript={adScript} setAdScript={setAdScript} episodeTitle={episodeTitle} brandedName={brandedName}/> : <div>Loading...</div>;
+      default: return <div />;
+    }
+  }
+
+  return (
+    <div className="min-h-screen font-sans bg-background text-text-primary flex flex-col">
+      <div className="w-full sm:max-w-7xl mx-auto sm:px-6 lg:px-8 flex-grow">
+        <header className="relative overflow-hidden pt-16 pb-12 text-center space-y-4">
+            <Logo />
+            <h1 className="text-5xl font-serif font-black text-text-primary tracking-tight">AI Podcast Studio</h1>
+            <p className="text-lg text-text-secondary">Craft, edit, and produce professional podcasts with AI.</p>
+        </header>
+        
+        {/* Main Tab Navigation */}
+        <div className="w-full mb-12">
+            <h2 className="text-center text-2xl font-serif font-bold text-gold mb-4 tracking-wider">Select Your Workspace</h2>
+            <div className="w-full border-b border-zinc-800 flex justify-center">
+                <nav className="flex items-center gap-4">
+                    <TabButton name="Creator" icon={<VideoIcon />} isActive={activeTab === 'creator'} onClick={() => setActiveTab('creator')} />
+                    <TabButton name="Editor" icon={<CutIcon />} isActive={activeTab === 'editor'} onClick={() => setActiveTab('editor')} />
+                    <TabButton name="About" icon={<InfoIcon />} isActive={activeTab === 'about'} onClick={() => setActiveTab('about')} />
+                </nav>
+            </div>
         </div>
-    )
-};
 
-// FIX: Added missing TabButton, AudioEditor, and AudioEditorTab components
+        {activeTab === 'creator' && (
+          <div className="fade-in">
+            <div className="sticky top-0 z-20 bg-background/80 backdrop-blur-lg py-8 px-4 sm:px-0">
+              <StepIndicator currentStep={currentStep} />
+            </div>
+          
+            <main className="py-12 px-4 sm:px-0">
+              <div className="bg-surface border border-zinc-800 rounded-xl p-6 mb-12 flex flex-col sm:flex-row gap-6 items-center shadow-lg max-w-4xl mx-auto">
+                    <select onChange={(e) => handleLoadEpisode(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none" value={loadedEpisodeId || ""} aria-label="Load saved episode">
+                        <option value="" disabled>Load a saved episode...</option>
+                        {episodes.map(ep => (<option key={ep.id} value={ep.id}>Ep {ep.episodeNumber}: {ep.title}</option>))}
+                    </select>
+                    <button onClick={handleStartOver} className="w-full sm:w-auto bg-primary text-on-primary font-bold py-4 px-8 rounded-lg hover:bg-primary-hover transition flex-shrink-0 shadow-primary-glow">
+                        New Episode
+                    </button>
+              </div>
+              <div key={currentStep} className="fade-in">
+                  {renderCreatorContent()}
+              </div>
+            </main>
+          </div>
+        )}
+        
+        {activeTab === 'editor' && <AudioEditorTab />}
+        {activeTab === 'about' && <AboutTab />}
+
+      </div>
+       <Footer onCreatorClick={() => setIsCreatorPopupVisible(true)} />
+      {isCreatorPopupVisible && <CreatorPopup onClose={() => setIsCreatorPopupVisible(false)} />}
+    </div>
+  );
+}
+
 const TabButton: React.FC<{ name: string; icon: React.ReactNode; isActive: boolean; onClick: () => void; }> = ({ name, icon, isActive, onClick }) => (
     <button
         onClick={onClick}
@@ -1289,7 +1714,7 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         if (!audioData) return;
         
         const rawData = decode(audioData);
-        const pcm = new Int16Array(rawData.buffer, rawData.byteOffset, rawData.length / 2);
+        const pcm = new Int16Array(rawData.buffer);
         const channelData = new Float32Array(pcm.length);
         for (let i = 0; i < pcm.length; i++) {
             channelData[i] = pcm[i] / 32768.0;
@@ -1591,475 +2016,64 @@ const AudioEditorTab = () => {
     return <AudioEditor initialAudioData={audioData} onStartOver={() => setAudioData(null)} />;
 };
 
-// FIX: Added the main App component to provide the default export
-export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('creator');
-  const [currentStep, setCurrentStep] = useState(1);
-  
-  // Step 1
-  const [samanthaName, setSamanthaName] = useState('Samantha');
-  const [stewardName, setStewardName] = useState('Steward');
-  const [samanthaVoice, setSamanthaVoice] = useState<string>('Kore');
-  const [samanthaCustomSamples, setSamanthaCustomSamples] = useState<CustomAudioSample[]>([]);
-  const [isRecordingSamantha, setIsRecordingSamantha] = useState<boolean>(false);
-  const [isPreviewingSamantha, setIsPreviewingSamantha] = useState(false);
-  const [isPreviewingSamanthaCustom, setIsPreviewingSamanthaCustom] = useState(false);
-  const samanthaAudioFileInputRef = useRef<HTMLInputElement>(null);
-  const [stewardVoice, setStewardVoice] = useState<string>('Fenrir');
-  const [stewardCustomSamples, setStewardCustomSamples] = useState<CustomAudioSample[]>([]);
-  const [isRecordingSteward, setIsRecordingSteward] = useState<boolean>(false);
-  const [isPreviewingSteward, setIsPreviewingSteward] = useState(false);
-  const [isPreviewingStewardCustom, setIsPreviewingStewardCustom] = useState(false);
-  const stewardAudioFileInputRef = useRef<HTMLInputElement>(null);
-  const [isThirdHostEnabled, setIsThirdHostEnabled] = useState(false);
-  const [thirdHostName, setThirdHostName] = useState('');
-  const [thirdHostRole, setThirdHostRole] = useState('');
-  const [thirdHostGender, setThirdHostGender] = useState<'male' | 'female'>('male');
-  const [thirdHostVoice, setThirdHostVoice] = useState<string>('Zephyr');
-  const [thirdHostCustomSamples, setThirdHostCustomSamples] = useState<CustomAudioSample[]>([]);
-  const [isRecordingThirdHost, setIsRecordingThirdHost] = useState<boolean>(false);
-  const [isPreviewingThirdHost, setIsPreviewingThirdHost] = useState(false);
-  const [isPreviewingThirdHostCustom, setIsPreviewingThirdHostCustom] = useState(false);
-  const [isPreviewingQuality, setIsPreviewingQuality] = useState(false);
-  const thirdHostAudioFileInputRef = useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+const AboutTab = () => {
+    return (
+        <div className="max-w-4xl mx-auto py-12 px-4 sm:px-0 fade-in">
+            <Card title="About AI Podcast Studio" icon={<InfoIcon />}>
+                <div className="prose prose-invert prose-lg text-text-secondary space-y-8">
+                    <p className="text-xl">
+                        Welcome to the <span className="text-gold font-bold">AI Podcast Studio</span>, a comprehensive suite of tools designed to take your podcast from a simple idea to a fully produced episode, all with the power of cutting-edge generative AI.
+                    </p>
 
-  // Step 2
-  const [episodeTitle, setEpisodeTitle] = useState('');
-  const [episodeNumber, setEpisodeNumber] = useState(1);
-  const [episodeLength, setEpisodeLength] = useState(10);
-  const [prompt, setPrompt] = useState<string>('');
-  const [pdfText, setPdfText] = useState<string>('');
-  const [fileName, setFileName] = useState<string>('');
-  const [manualScriptText, setManualScriptText] = useState<string>('');
-  const [customRules, setCustomRules] = useState<string>('');
-  const [language, setLanguage] = useState<'English' | 'Afrikaans'>('English');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Step 3
-  const [script, setScript] = useState<ScriptLine[] | null>(null);
-  const [brandedName, setBrandedName] = useState('Brands by Ai');
-  const [contactDetails, setContactDetails] = useState('');
-  const [website, setWebsite] = useState('');
-  const [slogan, setSlogan] = useState('');
-  const [backgroundSound, setBackgroundSound] = useState('none');
-  const [backgroundVolume, setBackgroundVolume] = useState(0.1);
-  
-  // Step 4
-  const [audioData, setAudioData] = useState<string | null>(null);
-  const [scriptTimings, setScriptTimings] = useState<ScriptTiming[] | null>(null);
-  const [areTimingsStale, setAreTimingsStale] = useState<boolean>(false);
-  const [adText, setAdText] = useState<string | null>(null);
-  const [adScript, setAdScript] = useState<string | null>(null);
+                    <div className="border-t border-zinc-700 pt-6">
+                        <h3 className="text-2xl text-text-primary font-serif mb-4">How It Works: A Step-by-Step Guide</h3>
+                        <p>The studio guides you through a simple, four-step process:</p>
+                        <ol className="list-decimal list-inside space-y-2">
+                            <li><strong>I: Define Your Hosts:</strong> Choose from hyper-realistic pre-built voices or clone your own by providing short audio samples. This step sets the personality of your show.</li>
+                            <li><strong>II: Content & AI Rules:</strong> This is where your story begins. Provide a topic, upload a PDF for context, or even paste in a draft script. You can add custom rules to guide the AI's writing style.</li>
+                            <li><strong>III: Finalize & Generate:</strong> Review the AI-generated script. You can edit the dialogue to perfection before moving on to the main event: audio generation.</li>
+                            <li><strong>IV: Production Studio:</strong> Listen to your fully generated podcast! Use the built-in editor to make final touches, then download your episode or generate promotional content.</li>
+                        </ol>
+                    </div>
 
-  // Episode Management
-  const [episodes, setEpisodes] = useState<Episode[]>([]);
-  const [loadedEpisodeId, setLoadedEpisodeId] = useState<string | null>(null);
+                    <div className="border-t border-zinc-700 pt-6">
+                        <h3 className="text-2xl text-text-primary font-serif mb-4">Key Features in Detail</h3>
+                        
+                        <div className="p-4 bg-zinc-900/50 rounded-lg">
+                            <h4 className="text-xl text-gold font-semibold">Hyper-Realistic Voices & Interruptions</h4>
+                            <p>Our AI doesn't just read lines; it performs them. It generates natural, conversational dialogue that sounds truly human. The secret is in the details: realistic pacing, emotional cues, and—most importantly—natural interruptions. This prevents the "turn-by-turn" feel of older text-to-speech, creating a dynamic and engaging listening experience.</p>
+                        </div>
+                        
+                        <div className="p-4 mt-4 bg-zinc-900/50 rounded-lg">
+                             <h4 className="text-xl text-gold font-semibold">Voice Cloning</h4>
+                            <p>Make your podcast uniquely yours. Instead of using pre-built voices, you can provide audio samples to create a custom voice clone for any host. The AI analyzes the unique characteristics of the voice—pitch, tone, and cadence—to create a digital model that can speak any line you give it.</p>
+                        </div>
 
-  // Global
-  const [isLoadingScript, setIsLoadingScript] = useState<boolean>(false);
-  const [isLoadingAudio, setIsLoadingAudio] = useState<boolean>(false);
-  const [error, setError] = useState<string>('');
-  const [isCreatorPopupVisible, setIsCreatorPopupVisible] = useState(false);
+                         <div className="p-4 mt-4 bg-zinc-900/50 rounded-lg">
+                             <h4 className="text-xl text-gold font-semibold">Intelligent Scripting from Any Source</h4>
+                            <p>Whether you have a fully formed idea or just a spark, the AI can help. It can generate a complete script from a simple topic, a detailed research paper in PDF format, or even polish and expand upon a rough draft you provide.</p>
+                             <p className="mt-2 text-sm italic"><strong>Example:</strong> Simply providing the topic "The history of coffee" and a 10-minute length can yield a full conversational script, complete with an intro, main discussion points, and an outro.</p>
+                        </div>
+                        
+                        <div className="p-4 mt-4 bg-zinc-900/50 rounded-lg">
+                             <h4 className="text-xl text-gold font-semibold">The Production Studio & Waveform Editor</h4>
+                            <p>Once your audio is generated, you enter the Production Studio. Here you'll see a visual representation of your audio—the waveform. You can play, pause, and listen to the final product. With the integrated Audio Editor, you can select parts of the waveform to make precise edits.</p>
+                             <p className="mt-2">Use the <span className="font-mono text-gold bg-zinc-800 px-1 rounded">Zoom Slider</span> to get a closer look at the audio, allowing you to trim silence, cut mistakes, or apply fades with pinpoint accuracy.</p>
+                        </div>
+                    </div>
 
-  const femaleVoices = [
-      { name: 'Kore', label: 'Twitch Streamer (Female, Energetic)' },
-      { name: 'Kore', label: 'Kore (Female, Clear & Professional)' },
-      { name: 'Charon', label: 'Charon (Female, Warm & Raspy)' },
-  ];
-  const maleVoices = [
-      { name: 'Puck', label: 'Twitch Streamer (Male, Expressive)' },
-      { name: 'Fenrir', label: 'Fenrir (Male, Deep & Resonant)' },
-      { name: 'Puck', label: 'Puck (Male, Warm & Engaging)' },
-      { name: 'Zephyr', label: 'Zephyr (Male, Crisp & Professional)' },
-  ];
-  
-  const resetState = (isNewEpisode: boolean = false) => {
-      setPrompt(''); setPdfText(''); setFileName(''); setManualScriptText('');
-      setCustomRules(''); setLanguage('English');
-      setSamanthaName('Samantha'); setStewardName('Steward');
-      setSamanthaVoice('Kore'); setSamanthaCustomSamples([]);
-      setStewardVoice('Fenrir'); setStewardCustomSamples([]);
-      setIsThirdHostEnabled(false); setThirdHostName(''); setThirdHostRole('');
-      setThirdHostGender('male'); setThirdHostVoice('Zephyr'); setThirdHostCustomSamples([]);
-      setScript(null); setAudioData(null); setScriptTimings(null);
-      setBrandedName('Brands by Ai'); setContactDetails(''); setWebsite(''); setSlogan('');
-      setBackgroundSound('none'); setBackgroundVolume(0.1);
-      setError(''); setIsLoadingScript(false); setIsLoadingAudio(false);
-      setAreTimingsStale(false); setAdText(null); setAdScript(null);
-      
-      if (isNewEpisode) {
-        setLoadedEpisodeId(null);
-        setEpisodeTitle('');
-        setEpisodeLength(10);
-        if (episodes.length > 0) {
-            const maxEpNum = Math.max(...episodes.map(e => e.episodeNumber));
-            setEpisodeNumber(maxEpNum + 1);
-        } else {
-            setEpisodeNumber(1);
-        }
-      }
-  };
+                    <div className="border-t border-zinc-700 pt-6">
+                         <h3 className="text-2xl text-text-primary font-serif mb-4">Tips for Best Results</h3>
+                        <ul className="list-disc pl-5 space-y-2">
+                            <li><strong>For Voice Cloning:</strong> Record in a quiet environment with no background noise. Speak clearly and naturally for at least 10-15 seconds. The more clean audio you provide (up to 5 samples), the better the clone will be.</li>
+                            <li><strong>For Scripting:</strong> Be specific in your prompts. Instead of "AI," try "The impact of generative AI on creative industries." Use the "Advanced AI Rules" to guide the tone, like "Keep the tone light and humorous" or "Avoid technical jargon."</li>
+                            <li><strong>For Editing:</strong> Use headphones to catch small details in the audio. Zoom in on the waveform before making a cut to ensure you're not clipping the beginning or end of a word.</li>
+                        </ul>
+                    </div>
 
-  const handleStartOver = () => {
-    resetState(true);
-    setCurrentStep(1);
-  };
-  
-  useEffect(() => {
-    try {
-        const savedEpisodes = localStorage.getItem('podcastEpisodes');
-        if (savedEpisodes) {
-            const parsed = JSON.parse(savedEpisodes);
-            setEpisodes(parsed);
-            if (parsed.length > 0) {
-                const maxEpNum = Math.max(...parsed.map((e: Episode) => e.episodeNumber));
-                setEpisodeNumber(maxEpNum + 1);
-            }
-        }
-    } catch (error) {
-        console.error("Failed to load episodes from localStorage", error);
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-        const storableEpisodes = episodes.map(ep => {
-            const { audioData, samanthaCustomSamples, stewardCustomSamples, thirdHostCustomSamples, ...storableEpisode } = ep;
-            return { 
-                ...storableEpisode, 
-                audioData: null,
-                samanthaCustomSamples: [],
-                stewardCustomSamples: [],
-                thirdHostCustomSamples: []
-            };
-        });
-        localStorage.setItem('podcastEpisodes', JSON.stringify(storableEpisodes));
-    } catch (error) {
-        console.error("Failed to save episodes to localStorage", error);
-    }
-  }, [episodes]);
-
-  useEffect(() => {
-    if (thirdHostGender === 'female') {
-      if (!femaleVoices.find(v => v.name === thirdHostVoice)) setThirdHostVoice('Charon');
-    } else {
-      if (!maleVoices.find(v => v.name === thirdHostVoice)) setThirdHostVoice('Zephyr');
-    }
-  }, [thirdHostGender, femaleVoices, maleVoices, thirdHostVoice]);
-
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setError(''); setFileName(file.name);
-      try {
-        setPdfText(await extractTextFromPdf(file));
-      } catch (e) {
-        setError("Failed to process PDF."); setFileName(''); setPdfText('');
-      }
-    }
-  };
-
-  const handleGenerateScript = useCallback(async () => {
-    if (!episodeTitle.trim() || episodeNumber <= 0) {
-        setError('Please provide an Episode Title and Number.'); setCurrentStep(2); return;
-    }
-    if (!prompt && !pdfText && !manualScriptText) {
-      setError('Please provide a topic, upload a PDF, or write a custom script.'); return;
-    }
-
-    setIsLoadingScript(true); setError(''); setScript(null); setAudioData(null); setScriptTimings(null);
-    
-    try {
-      const branding = { name: brandedName, contact: contactDetails, website, slogan };
-      const thirdHost = isThirdHostEnabled && thirdHostName ? { name: thirdHostName, role: thirdHostRole, gender: thirdHostGender } : undefined;
-      const generatedScript = await generateScript( prompt, pdfText, branding, manualScriptText, customRules, language, samanthaName || 'Samantha', stewardName || 'Steward', thirdHost, 'South African', episodeTitle, episodeNumber, episodeLength );
-      setScript(generatedScript); setCurrentStep(3);
-    } catch (e: any) {
-      setError(`Failed to generate script: ${e.message}`);
-    } finally {
-      setIsLoadingScript(false);
-    }
-  }, [prompt, pdfText, brandedName, contactDetails, website, slogan, manualScriptText, customRules, language, samanthaName, stewardName, isThirdHostEnabled, thirdHostName, thirdHostRole, thirdHostGender, episodeTitle, episodeNumber, episodeLength]);
-  
-  const handleGenerateAudio = useCallback(async () => {
-    if (!script) { setError('No script available to generate audio.'); return; }
-    setIsLoadingAudio(true); setError(''); setAudioData(null); setScriptTimings(null); setAreTimingsStale(false);
-
-    try {
-        const getVoiceConfig = async (samples: CustomAudioSample[], prebuiltName: string): Promise<VoiceConfig> => {
-            if (samples.length > 0) {
-                const { data, mimeType } = await combineCustomAudioSamples(samples);
-                return { type: 'custom', data, mimeType };
-            }
-            return { type: 'prebuilt', name: prebuiltName };
-        };
-
-      const samanthaVoiceConfig = await getVoiceConfig(samanthaCustomSamples, samanthaVoice);
-      const stewardVoiceConfig = await getVoiceConfig(stewardCustomSamples, stewardVoice);
-      const thirdHostVoiceConfig = isThirdHostEnabled && thirdHostName ? await getVoiceConfig(thirdHostCustomSamples, thirdHostVoice) : undefined;
-      
-      const thirdHostPayload = isThirdHostEnabled && thirdHostName && thirdHostVoiceConfig ? { name: thirdHostName, voiceConfig: thirdHostVoiceConfig, gender: thirdHostGender } : undefined;
-      const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, thirdHostPayload, 'South African', backgroundSound, backgroundVolume);
-      setAudioData(audioData); setScriptTimings(timings); setCurrentStep(4);
-    } catch (e: any) {
-      setError(`Failed to generate audio: ${e.message}`);
-      setCurrentStep(3);
-    } finally {
-      setIsLoadingAudio(false);
-    }
-  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, thirdHostCustomSamples, samanthaName, stewardName, isThirdHostEnabled, thirdHostName, thirdHostVoice, thirdHostGender, backgroundSound, backgroundVolume]);
-
-  const handleDownloadAudio = () => {
-    if (!audioData) return;
-    const rawData = decode(audioData);
-    const wavBlob = pcmToWav(rawData, 24000, 1, 16);
-    const url = URL.createObjectURL(wavBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `podcast_ep${episodeNumber}_${episodeTitle.replace(/\s+/g, '_')}.wav`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-  
-  const handlePreviewVoice = useCallback(async (speaker: Speaker) => {
-    let voiceName: string, setIsPreviewing: (val: boolean) => void;
-    if (speaker === 'samantha') { voiceName = samanthaVoice; setIsPreviewing = setIsPreviewingSamantha; } 
-    else if (speaker === 'steward') { voiceName = stewardVoice; setIsPreviewing = setIsPreviewingSteward; } 
-    else { voiceName = thirdHostVoice; setIsPreviewing = setIsPreviewingThirdHost; }
-    setIsPreviewing(true); setError('');
-    try {
-      const audioBase64 = await previewVoice(voiceName, language, 'South African');
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      const decodedData = decode(audioBase64);
-      const buffer = await customDecodeAudioData(decodedData, audioContext, 24000, 1);
-      const source = audioContext.createBufferSource();
-      source.buffer = buffer;
-      source.connect(audioContext.destination);
-      source.start();
-      source.onended = () => setIsPreviewing(false);
-    } catch (e: any) {
-      setError(`Failed to preview voice: ${e.message}`); setIsPreviewing(false);
-    }
-  }, [samanthaVoice, stewardVoice, thirdHostVoice, language]);
-
-  const handlePreviewQuality = async () => {
-    setIsPreviewingQuality(true); setError('');
-    try {
-        const audioBase64 = await generateQualityPreviewAudio(samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoice, stewardVoice, 'South African');
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-        const decodedData = decode(audioBase64);
-        const buffer = await customDecodeAudioData(decodedData, audioContext, 24000, 1);
-        const source = audioContext.createBufferSource();
-        source.buffer = buffer; source.connect(audioContext.destination); source.start();
-        source.onended = () => setIsPreviewingQuality(false);
-    } catch (e: any) {
-        setError(`Failed to generate quality preview: ${e.message}`); setIsPreviewingQuality(false);
-    }
-  };
-  
-  const handlePreviewCustomVoice = useCallback(async (speaker: Speaker) => {
-    let customSamples: CustomAudioSample[], setIsPreviewing: (val: boolean) => void;
-    if (speaker === 'samantha') { customSamples = samanthaCustomSamples; setIsPreviewing = setIsPreviewingSamanthaCustom; } 
-    else if (speaker === 'steward') { customSamples = stewardCustomSamples; setIsPreviewing = setIsPreviewingStewardCustom; } 
-    else { customSamples = thirdHostCustomSamples; setIsPreviewing = setIsPreviewingThirdHostCustom; }
-    
-    if (customSamples.length === 0) return;
-
-    setIsPreviewing(true); setError('');
-    try {
-      const combinedSample = await combineCustomAudioSamples(customSamples);
-      const audioBase64 = await previewClonedVoice(combinedSample, language, 'South African');
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      const decodedData = decode(audioBase64);
-      const buffer = await customDecodeAudioData(decodedData, audioContext, 24000, 1);
-      const source = audioContext.createBufferSource();
-      source.buffer = buffer; source.connect(audioContext.destination); source.start();
-      source.onended = () => setIsPreviewing(false);
-    } catch (e: any) {
-      setError(`Failed to preview custom voice: ${e.message}`); setIsPreviewing(false);
-    }
-  }, [samanthaCustomSamples, stewardCustomSamples, thirdHostCustomSamples, language]);
-  
-  const handleToggleRecording = async (speaker: Speaker) => {
-    let isRecording: boolean, setIsRecording: (val: boolean) => void, samples: CustomAudioSample[];
-    if (speaker === 'samantha') { isRecording = isRecordingSamantha; setIsRecording = setIsRecordingSamantha; samples = samanthaCustomSamples } 
-    else if (speaker === 'steward') { isRecording = isRecordingSteward; setIsRecording = setIsRecordingSteward; samples = stewardCustomSamples } 
-    else { isRecording = isRecordingThirdHost; setIsRecording = setIsRecordingThirdHost; samples = thirdHostCustomSamples }
-    
-    if (samples.length >= 5) {
-      setError("You can add a maximum of 5 audio samples.");
-      return;
-    }
-
-    if (isRecording) {
-      mediaRecorderRef.current?.stop(); setIsRecording(false);
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-        mediaRecorderRef.current = mediaRecorder; audioChunksRef.current = [];
-        mediaRecorder.ondataavailable = (event) => audioChunksRef.current.push(event.data);
-        mediaRecorder.onstop = async () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          try {
-            const { base64, mimeType } = await import('./utils/audioUtils').then(m => m.processAudioForCloning(audioBlob));
-            const url = `data:${mimeType};base64,${base64}`;
-            const customAudio: CustomAudioSample = { url, base64, mimeType, name: `Recording ${new Date().toLocaleTimeString()}` };
-            if (speaker === 'samantha') setSamanthaCustomSamples(prev => [...prev, customAudio]);
-            else if (speaker === 'steward') setStewardCustomSamples(prev => [...prev, customAudio]);
-            else setThirdHostCustomSamples(prev => [...prev, customAudio]);
-          } catch(e: any) {
-             setError(e.message || "Failed to process recording.");
-          } finally {
-            stream.getTracks().forEach(track => track.stop());
-          }
-        };
-        mediaRecorder.start(); setIsRecording(true);
-      } catch (e) { setError("Could not access microphone."); }
-    }
-  };
-  
-  const handleAudioFileChange = async (event: React.ChangeEvent<HTMLInputElement>, speaker: Speaker) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      let samples: CustomAudioSample[];
-      if (speaker === 'samantha') samples = samanthaCustomSamples;
-      else if (speaker === 'steward') samples = stewardCustomSamples;
-      else samples = thirdHostCustomSamples;
-      
-      if (samples.length >= 5) {
-        setError("You can add a maximum of 5 audio samples.");
-        return;
-      }
-
-      setError('');
-      try {
-        const { base64, mimeType } = await import('./utils/audioUtils').then(m => m.processAudioForCloning(file));
-        const url = `data:${mimeType};base64,${base64}`;
-        const customAudio: CustomAudioSample = { url, base64, mimeType, name: file.name };
-        if (speaker === 'samantha') setSamanthaCustomSamples(prev => [...prev, customAudio]);
-        else if (speaker === 'steward') setStewardCustomSamples(prev => [...prev, customAudio]);
-        else setThirdHostCustomSamples(prev => [...prev, customAudio]);
-      } catch (e: any) { setError(e.message || "Failed to read and process audio file."); }
-    }
-    if (event.target) { event.target.value = ''; }
-  };
-  
-  const handleRemoveCustomAudio = (speaker: Speaker, index: number) => {
-    if (speaker === 'samantha') setSamanthaCustomSamples(prev => prev.filter((_, i) => i !== index));
-    else if (speaker === 'steward') setStewardCustomSamples(prev => prev.filter((_, i) => i !== index));
-    else setThirdHostCustomSamples(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleSaveOrUpdateEpisode = () => {
-    if (!episodeTitle.trim() || episodeNumber <= 0) { setError("Episode Title and Number are required to save."); return; }
-    const episodeData: Omit<Episode, 'id' | 'title' | 'episodeNumber'> = {
-        samanthaName, stewardName, samanthaVoice, samanthaCustomSamples, stewardVoice, stewardCustomSamples,
-        isThirdHostEnabled, thirdHostName, thirdHostRole, thirdHostGender, thirdHostVoice, thirdHostCustomSamples,
-        prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength,
-        script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound, backgroundVolume, audioData,
-        adText, adScript
-    };
-    if (loadedEpisodeId) {
-        setEpisodes(prev => prev.map(ep => ep.id === loadedEpisodeId ? { ...ep, ...episodeData, title: episodeTitle, episodeNumber } : ep));
-    } else {
-        const newId = `ep_${Date.now()}`;
-        setEpisodes(prev => [...prev, { ...episodeData, id: newId, title: episodeTitle, episodeNumber }]);
-        setLoadedEpisodeId(newId);
-    }
-    setError('');
-  };
-  
-  const handleLoadEpisode = (id: string) => {
-    if (!id) return;
-    const ep = episodes.find(e => e.id === id);
-    if (!ep) { setError("Could not find the selected episode to load."); return; }
-    setSamanthaName(ep.samanthaName); setStewardName(ep.stewardName);
-    setSamanthaVoice(ep.samanthaVoice); setSamanthaCustomSamples(ep.samanthaCustomSamples || []);
-    setStewardVoice(ep.stewardVoice); setStewardCustomSamples(ep.stewardCustomSamples || []);
-    setIsThirdHostEnabled(ep.isThirdHostEnabled); setThirdHostName(ep.thirdHostName);
-    setThirdHostRole(ep.thirdHostRole); setThirdHostGender(ep.thirdHostGender);
-    setThirdHostVoice(ep.thirdHostVoice); setThirdHostCustomSamples(ep.thirdHostCustomSamples || []);
-    setPrompt(ep.prompt); setPdfText(ep.pdfText); setFileName(ep.fileName);
-    setManualScriptText(ep.manualScriptText); setCustomRules(ep.customRules); setLanguage(ep.language); setEpisodeLength(ep.episodeLength || 10);
-    setScript(ep.script); setScriptTimings(ep.scriptTimings); setBrandedName(ep.brandedName);
-    setContactDetails(ep.contactDetails); setWebsite(ep.website); setSlogan(ep.slogan);
-    setBackgroundSound(ep.backgroundSound); setBackgroundVolume(ep.backgroundVolume || 0.1);
-    setAudioData(ep.audioData); setEpisodeTitle(ep.title); setEpisodeNumber(ep.episodeNumber);
-    setLoadedEpisodeId(ep.id);
-    setAdText(ep.adText || null); setAdScript(ep.adScript || null);
-    if (ep.audioData) setCurrentStep(4);
-    else if (ep.script) setCurrentStep(3);
-    else setCurrentStep(2);
-    setError('');
-  };
-
-  const areContentInputsValid = () => !!(prompt || pdfText || manualScriptText);
-  const areHostsValid = () => samanthaName.trim() !== '' && stewardName.trim() !== '' && (!isThirdHostEnabled || (thirdHostName.trim() !== '' && thirdHostRole.trim() !== ''));
-
-  const renderCreatorContent = () => {
-    switch(currentStep) {
-      case 1: return <StepHosts error={error} setError={setError} samanthaName={samanthaName} setSamanthaName={setSamanthaName} stewardName={stewardName} setStewardName={setStewardName} samanthaVoice={samanthaVoice} setSamanthaVoice={setSamanthaVoice} stewardVoice={stewardVoice} setStewardVoice={setStewardVoice} isThirdHostEnabled={isThirdHostEnabled} setIsThirdHostEnabled={setIsThirdHostEnabled} thirdHostName={thirdHostName} setThirdHostName={setThirdHostName} thirdHostRole={thirdHostRole} setThirdHostRole={setThirdHostRole} thirdHostGender={thirdHostGender} setThirdHostGender={setThirdHostGender} thirdHostVoice={thirdHostVoice} setThirdHostVoice={setThirdHostVoice} isPreviewingSamantha={isPreviewingSamantha} isPreviewingSteward={isPreviewingSteward} isPreviewingThirdHost={isPreviewingThirdHost} handlePreviewVoice={handlePreviewVoice} femaleVoices={femaleVoices} maleVoices={maleVoices} areHostsValid={areHostsValid} setCurrentStep={setCurrentStep} samanthaCustomSamples={samanthaCustomSamples} isPreviewingSamanthaCustom={isPreviewingSamanthaCustom} isRecordingSamantha={isRecordingSamantha} samanthaAudioFileInputRef={samanthaAudioFileInputRef} stewardCustomSamples={stewardCustomSamples} isPreviewingStewardCustom={isPreviewingStewardCustom} isRecordingSteward={isRecordingSteward} stewardAudioFileInputRef={stewardAudioFileInputRef} thirdHostCustomSamples={thirdHostCustomSamples} isPreviewingThirdHostCustom={isPreviewingThirdHostCustom} isRecordingThirdHost={isRecordingThirdHost} thirdHostAudioFileInputRef={thirdHostAudioFileInputRef} handlePreviewCustomVoice={handlePreviewCustomVoice} handleRemoveCustomAudio={handleRemoveCustomAudio} handleToggleRecording={handleToggleRecording} handleAudioFileChange={handleAudioFileChange} isPreviewingQuality={isPreviewingQuality} handlePreviewQuality={handlePreviewQuality} />;
-      case 2: return <StepContent error={error} episodeTitle={episodeTitle} setEpisodeTitle={setEpisodeTitle} episodeNumber={episodeNumber} setEpisodeNumber={setEpisodeNumber} episodeLength={episodeLength} setEpisodeLength={setEpisodeLength} language={language} setLanguage={setLanguage} prompt={prompt} setPrompt={setPrompt} fileName={fileName} fileInputRef={fileInputRef} handleFileChange={handleFileChange} samanthaName={samanthaName} stewardName={stewardName} manualScriptText={manualScriptText} setManualScriptText={setManualScriptText} customRules={customRules} setCustomRules={setCustomRules} setCurrentStep={setCurrentStep} handleGenerateScript={handleGenerateScript} isLoadingScript={isLoadingScript} areContentInputsValid={areContentInputsValid} />;
-      case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} backgroundSound={backgroundSound} setBackgroundSound={setBackgroundSound} backgroundVolume={backgroundVolume} setBackgroundVolume={setBackgroundVolume} />;
-      case 4: return script && audioData && scriptTimings ? <StepStudio audioData={audioData} setAudioData={setAudioData} script={script} scriptTimings={scriptTimings} handleDownloadAudio={handleDownloadAudio} handleStartOver={handleStartOver} handleSaveOrUpdateEpisode={handleSaveOrUpdateEpisode} loadedEpisodeId={loadedEpisodeId} areTimingsStale={areTimingsStale} setAreTimingsStale={setAreTimingsStale} adText={adText} setAdText={setAdText} adScript={adScript} setAdScript={setAdScript} episodeTitle={episodeTitle} brandedName={brandedName}/> : <div>Loading...</div>;
-      default: return <div />;
-    }
-  }
-
-  return (
-    <div className="min-h-screen font-sans bg-background text-text-primary flex flex-col">
-      <div className="w-full sm:max-w-7xl mx-auto sm:px-6 lg:px-8 flex-grow">
-        <header className="relative overflow-hidden pt-16 pb-12 text-center space-y-4">
-            <Logo />
-            <h1 className="text-5xl font-serif font-black text-text-primary tracking-tight">AI Podcast Studio</h1>
-            <p className="text-lg text-text-secondary">Craft, edit, and produce professional podcasts with AI.</p>
-        </header>
-        
-        <div className="w-full mb-12">
-            <h2 className="text-center text-2xl font-serif font-bold text-gold mb-4 tracking-wider">Select Your Workspace</h2>
-            <div className="w-full border-b border-zinc-800 flex justify-center">
-                <nav className="flex items-center gap-4">
-                    <TabButton name="Creator" icon={<VideoIcon />} isActive={activeTab === 'creator'} onClick={() => setActiveTab('creator')} />
-                    <TabButton name="Editor" icon={<CutIcon />} isActive={activeTab === 'editor'} onClick={() => setActiveTab('editor')} />
-                    <TabButton name="About" icon={<InfoIcon />} isActive={activeTab === 'about'} onClick={() => setActiveTab('about')} />
-                </nav>
-            </div>
+                    <p>This application is designed to streamline the entire podcast creation workflow, giving you professional-grade tools in a simple, intuitive interface. Happy podcasting!</p>
+                </div>
+            </Card>
         </div>
-
-        {activeTab === 'creator' && (
-          <div className="fade-in">
-            <div className="sticky top-0 z-20 bg-background/80 backdrop-blur-lg py-8 px-4 sm:px-0">
-              <StepIndicator currentStep={currentStep} />
-            </div>
-          
-            <main className="py-12 px-4 sm:px-0">
-              <div className="bg-surface border border-zinc-800 rounded-xl p-6 mb-12 flex flex-col sm:flex-row gap-6 items-center shadow-lg max-w-4xl mx-auto">
-                    <select onChange={(e) => handleLoadEpisode(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none" value={loadedEpisodeId || ""} aria-label="Load saved episode">
-                        <option value="" disabled>Load a saved episode...</option>
-                        {episodes.map(ep => (<option key={ep.id} value={ep.id}>Ep {ep.episodeNumber}: {ep.title}</option>))}
-                    </select>
-                    <button onClick={handleStartOver} className="w-full sm:w-auto bg-primary text-on-primary font-bold py-4 px-8 rounded-lg hover:bg-primary-hover transition flex-shrink-0 shadow-primary-glow">
-                        New Episode
-                    </button>
-              </div>
-              <div key={currentStep} className="fade-in">
-                  {renderCreatorContent()}
-              </div>
-            </main>
-          </div>
-        )}
-        
-        {activeTab === 'editor' && <AudioEditorTab />}
-        {activeTab === 'about' && <AboutTab />}
-
-      </div>
-       <Footer onCreatorClick={() => setIsCreatorPopupVisible(true)} />
-      {isCreatorPopupVisible && <CreatorPopup onClose={() => setIsCreatorPopupVisible(false)} />}
-    </div>
-  );
-}
+    )
+};

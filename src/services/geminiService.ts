@@ -1,8 +1,19 @@
 import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
-import { ScriptLine, VoiceConfig, ScriptTiming } from '../types';
-import { decode, encode, concatenatePcm, getPcmChunkDuration, mixAudio } from '../utils/audioUtils';
-import { getApiKeys } from './apiKeyService';
-import { BACKGROUND_AUDIO } from "../assets/backgroundAudio";
+import { ScriptLine, VoiceConfig, ScriptTiming, GuestHost } from '../types';
+import { decode, encode, concatenatePcm, getPcmChunkDuration } from '../utils/audioUtils';
+
+// --- API Key Rotation System ---
+// Prioritizes the main environment key, then falls back to rotational keys.
+// A Set is used to prevent duplicate keys if they are defined in multiple places.
+const apiKeys = [
+  ...new Set([
+    process.env.API_KEY, // Primary key from AI Studio or VITE_API_KEY
+    process.env.API_KEY_1,
+    process.env.API_KEY_2,
+    process.env.API_KEY_3,
+  ]),
+].filter(Boolean) as string[];
+
 
 /**
  * Translates cryptic API errors into user-friendly, actionable messages.
@@ -16,22 +27,28 @@ function getFriendlyErrorMessage(error: any): string {
 
   let message = error.message || String(error);
 
+  // The Gemini SDK often includes details in a `toString()` method that aren't in `message`.
   const errorString = error.toString();
   if (errorString.includes('[GoogleGenerativeAI Error]')) {
+    // Extract the message part after the prefix
     message = errorString.replace('[GoogleGenerativeAI Error]:', '').trim();
   }
   
+  // User-friendly mappings for common technical errors
   if (message.toLowerCase().includes("api key not valid")) {
-    return "Authentication failed: The active API key is not valid. Please check the key in the Settings tab or try another one.";
+    return "Authentication failed: The API key is not valid. Please ensure your key is correct and has the necessary permissions.";
   }
   if (message.toLowerCase().includes("permission denied")) {
-      return "Permission Denied: The active API key is missing necessary permissions for this operation. Please check your Google Cloud project settings.";
+      return "Permission Denied: The API key is missing necessary permissions for the requested operation. Please check your Google Cloud project settings.";
   }
-  if (message.toLowerCase().includes("resource has been exhausted") || message.toLowerCase().includes("quota")) {
-      return "Quota Exceeded: The current API key has reached its usage limit. Please try switching to another key in the Settings tab or try again later.";
+  if (message.toLowerCase().includes("model `gemini-2.5-pro` not found")) {
+      return "Model Not Found: The 'gemini-2.5-pro' model is unavailable. This may be a temporary issue or a problem with your API key's permissions.";
+  }
+  if (message.toLowerCase().includes("resource has been exhausted")) {
+      return "Quota Exceeded: You have exceeded your usage limit for the API. Please check your billing account or try again later.";
   }
   if (message.toLowerCase().includes("invalid argument")) {
-      return "Invalid Request: The request sent to the AI was invalid. This could be due to an unsupported voice, a problem with the script, or malformed custom samples.";
+      return "Invalid Request: The request sent to the AI was invalid. This could be due to an unsupported voice, a problem with the script content, or malformed custom samples. Please try adjusting your inputs.";
   }
    if (message.toLowerCase().includes("deadline exceeded")) {
       return "The request timed out. This can happen with very long scripts or during periods of high demand. Please try again or consider shortening the script.";
@@ -40,51 +57,44 @@ function getFriendlyErrorMessage(error: any): string {
   return message;
 }
 
+
 /**
- * A wrapper function that handles API key rotation for Gemini API calls using user-provided keys.
- * It prioritizes the active key, then falls back to other available keys on quota errors.
+ * A wrapper function that handles API key rotation for Gemini API calls.
+ * It iterates through the available API keys, retrying the call if a quota-related
+ * error is encountered.
  *
  * @param apiCall A function that takes a `GoogleGenAI` instance and performs an API call.
  * @returns The result of the successful API call.
  * @throws An error if all API keys fail or if a non-quota error occurs.
  */
-async function withApiKeys<T>(apiCall: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
-  const userApiKeys = getApiKeys();
-  if (userApiKeys.length === 0) {
-    throw new Error("No API keys configured. Please add and activate a key in the Settings tab.");
+async function withApiKeyRotation<T>(apiCall: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
+  if (apiKeys.length === 0) {
+    throw new Error("No API keys configured. Please set VITE_API_KEY in your environment.");
   }
-
-  // Create a prioritized list: active key first, then the rest.
-  const activeKey = userApiKeys.find(k => k.isActive);
-  const otherKeys = userApiKeys.filter(k => !k.isActive);
-  
-  if (!activeKey) {
-    throw new Error("No active API key. Please select an active key in the Settings tab.");
-  }
-
-  const prioritizedKeys = [activeKey, ...otherKeys].map(k => k.key);
 
   let lastError: any = null;
 
-  for (const apiKey of prioritizedKeys) {
+  for (const apiKey of apiKeys) {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const result = await apiCall(ai);
-      return result;
+      return result; // Success, return immediately
     } catch (e: any) {
       lastError = e;
       const errorMessage = (e?.message || e.toString()).toLowerCase();
       
       if (errorMessage.includes('quota') || errorMessage.includes('rate limit') || errorMessage.includes('resource has been exhausted')) {
-        console.warn(`API key starting with ${apiKey.substring(0,4)} failed due to quota issue. Trying next key.`);
-        continue; // Try the next key
+        console.warn(`API key failed due to quota issue. Switching to the next key.`);
+        continue;
       } else {
+        // Not a quota error, fail fast with a user-friendly message
         throw new Error(getFriendlyErrorMessage(e));
       }
     }
   }
 
-  throw new Error(`All available API keys have reached their usage limits or failed. Last error: ${getFriendlyErrorMessage(lastError)}`);
+  // If the loop completes, all keys have failed due to quota issues
+  throw new Error(`All API keys have reached their usage limits. Please try again later. Last error: ${getFriendlyErrorMessage(lastError)}`);
 }
 
 
@@ -94,12 +104,6 @@ interface Branding {
     contact?: string;
     website?: string;
     slogan?: string;
-}
-
-interface ThirdHost {
-    name: string;
-    role: string;
-    gender: 'male' | 'female';
 }
 
 type Accent = 'Default' | 'South African';
@@ -116,7 +120,7 @@ export async function generateScript(
     language: 'English' | 'Afrikaans' = 'English',
     samanthaName: string = 'Samantha',
     stewardName: string = 'Steward',
-    thirdHost?: ThirdHost,
+    guestHosts?: GuestHost[],
     accent: Accent = 'South African',
     episodeTitle?: string,
     episodeNumber?: number,
@@ -171,16 +175,19 @@ export async function generateScript(
 
   const hosts = [`"${samanthaName}" (a woman)`, `"${stewardName}" (a man)`];
   const speakerEnum = [samanthaName, stewardName];
-  if (thirdHost) {
-      hosts.push(`and "${thirdHost.name}" (a ${thirdHost.gender})`);
-      speakerEnum.push(thirdHost.name);
+  if (guestHosts && guestHosts.length > 0) {
+    guestHosts.forEach(guest => {
+        hosts.push(`"${guest.name}" (a ${guest.gender}, role: ${guest.role})`);
+        speakerEnum.push(guest.name);
+    });
   }
 
-  const thirdHostInstruction = thirdHost ? `
-    There is a third person, "${thirdHost.name}", joining the conversation.
-    - **Role:** ${thirdHost.name}'s role is: "${thirdHost.role}". Their contributions must be focused on this role.
-    - **Integrate Naturally:** Weave ${thirdHost.name} into the conversation organically.
+  const guestHostInstruction = guestHosts && guestHosts.length > 0 ? `
+    There are ${guestHosts.length} guest(s) joining the conversation:
+    ${guestHosts.map(g => `- **${g.name}**: Their role is "${g.role}". Their contributions must be focused on this role.`).join('\n')}
+    Integrate them naturally into the conversation.
   ` : '';
+
 
   const episodeContext = (episodeTitle && episodeNumber) 
     ? `This is Episode ${episodeNumber}, titled "${episodeTitle}". The hosts should reference this information in their introduction.`
@@ -191,10 +198,10 @@ export async function generateScript(
 
   const fullPrompt = `
     You are an elite podcast script writer and performance director. Your task is to generate an intellectually stimulating and natural-sounding podcast script in ${language}.
-    The podcast has two hosts: ${hosts.join(', ')}. Their names must be used exactly as provided.
+    The podcast has the following speakers: ${hosts.join(', ')}. Their names must be used exactly as provided.
     
     ${episodeContext}
-    ${thirdHostInstruction}
+    ${guestHostInstruction}
     ${topic ? `The topic for this episode is: "${topic}".` : ''}
     ${context ? `Use the following document as the primary source of information:\n\n---DOCUMENT START---\n${context}\n---DOCUMENT END---` : ''}
     
@@ -211,7 +218,7 @@ export async function generateScript(
     3.  The output MUST be a valid JSON array of script line objects.
   `;
     
-  const response = await withApiKeys(async (ai) => 
+  const response = await withApiKeyRotation(async (ai) => 
     ai.models.generateContent({
         model: 'gemini-2.5-pro',
         contents: fullPrompt,
@@ -265,8 +272,12 @@ async function generateSingleSpeakerAudio(
   voiceConfig: VoiceConfig,
   cue?: string
 ): Promise<string> {
+  // FIX: Simplified the prompt for the TTS model. It understands cues directly in the format `(cue) text`.
+  // This is more reliable and aligns with best practices for the gemini-2.5-flash-preview-tts model.
   const performableText = cue ? `(${cue}) ${text}` : text;
 
+  // FIX: Correctly structure the speechConfig payload. The `voiceConfig` object contains
+  // either a `customVoice` or a `prebuiltVoiceConfig` object. This resolves the TypeScript error.
   const speechConfigPayload = {
     voiceConfig:
       voiceConfig.type === 'custom'
@@ -280,7 +291,7 @@ async function generateSingleSpeakerAudio(
           },
   };
 
-  const response = await withApiKeys(async (ai) =>
+  const response = await withApiKeyRotation(async (ai) =>
     ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: performableText }] }],
@@ -305,27 +316,30 @@ export async function generatePodcastAudio(
     stewardName: string,
     samanthaVoiceConfig: VoiceConfig, 
     stewardVoiceConfig: VoiceConfig,
-    thirdHost?: { name: string; voiceConfig: VoiceConfig; gender: 'male' | 'female' },
-    accent: Accent = 'South African',
-    backgroundSound?: string,
-    backgroundVolume?: number,
+    guestHosts?: { name: string; voiceConfig: VoiceConfig; }[],
+    accent: Accent = 'South African'
 ): Promise<{ audioData: string; timings: ScriptTiming[] }> {
     const rawAudioChunks: Uint8Array[] = [];
     const timings: ScriptTiming[] = [];
     let cumulativeTime = 0;
+
+    const hostVoiceConfigs = new Map<string, VoiceConfig>();
+    hostVoiceConfigs.set(samanthaName, samanthaVoiceConfig);
+    hostVoiceConfigs.set(stewardName, stewardVoiceConfig);
+    if (guestHosts) {
+        guestHosts.forEach(g => hostVoiceConfigs.set(g.name, g.voiceConfig));
+    }
     
+    // First pass: generate all audio chunks
     for (const line of script) {
-        let voiceConfig: VoiceConfig | undefined;
-        if (line.speaker === samanthaName) voiceConfig = samanthaVoiceConfig;
-        else if (line.speaker === stewardName) voiceConfig = stewardVoiceConfig;
-        else if (thirdHost && line.speaker === thirdHost.name) voiceConfig = thirdHost.voiceConfig;
+        const voiceConfig = hostVoiceConfigs.get(line.speaker);
         
         if (voiceConfig) {
             const base64Chunk = await generateSingleSpeakerAudio(line.dialogue, voiceConfig, line.cue);
             rawAudioChunks.push(decode(base64Chunk));
         } else {
             console.warn(`Unknown speaker in script: ${line.speaker}`);
-            rawAudioChunks.push(new Uint8Array(0));
+            rawAudioChunks.push(new Uint8Array(0)); // Push empty chunk to maintain index alignment
         }
     }
 
@@ -335,16 +349,20 @@ export async function generatePodcastAudio(
     
     const finalAudioChunks: Uint8Array[] = [];
 
+    // Second pass: process interruptions and calculate timings
     for (let i = 0; i < script.length; i++) {
         let pcmChunk = rawAudioChunks[i];
         if (pcmChunk.length === 0) continue;
 
+        // FIX: If the *next* line is an interruption, truncate *this* line's audio slightly
+        // to create a more natural-sounding overlap effect.
         if (script[i + 1]?.isInterruption) {
             const originalDuration = getPcmChunkDuration(pcmChunk, 24000, 16);
-            const cutoffDuration = 0.25; 
+            const cutoffDuration = 0.25; // Cut off the last 250ms
 
             if (originalDuration > cutoffDuration) {
-                const bytesToKeep = Math.floor((originalDuration - cutoffDuration) * 24000 * 2);
+                const bytesToKeep = Math.floor((originalDuration - cutoffDuration) * 24000 * 2); // sampleRate * bytesPerSample
+                // Ensure bytesToKeep is an even number for 16-bit samples
                 const finalBytes = bytesToKeep - (bytesToKeep % 2);
                 pcmChunk = pcmChunk.slice(0, finalBytes);
             }
@@ -366,17 +384,7 @@ export async function generatePodcastAudio(
         throw new Error("Audio generation resulted in no audio data.");
     }
 
-    let concatenatedPcm = concatenatePcm(finalAudioChunks);
-    
-    // Mix background audio if selected
-    if (backgroundSound && backgroundSound !== 'none' && backgroundVolume && backgroundVolume > 0) {
-        const track = BACKGROUND_AUDIO[backgroundSound];
-        if (track) {
-            const backgroundPcm = decode(track.data);
-            concatenatedPcm = mixAudio(concatenatedPcm, backgroundPcm, backgroundVolume);
-        }
-    }
-
+    const concatenatedPcm = concatenatePcm(finalAudioChunks);
     const finalAudioData = encode(concatenatedPcm);
 
     return { audioData: finalAudioData, timings };
@@ -412,9 +420,10 @@ export async function previewVoice(voiceName: string, language: 'English' | 'Afr
         ? 'Hallo, jy luister na n voorskou van hierdie stem.'
         : 'Hello, you are listening to a preview of this voice.';
     
+    // FIX: Simplified the prompt for the TTS model for better consistency.
     const prompt = `(warm, natural) ${previewText}`;
     
-    const response = await withApiKeys(async (ai) => 
+    const response = await withApiKeyRotation(async (ai) => 
         ai.models.generateContent({
             model: "gemini-2.5-flash-preview-tts",
             contents: [{ parts: [{ text: prompt }] }],
@@ -446,9 +455,11 @@ export async function previewClonedVoice(
     ? 'Hierdie is n voorskou van die gekloonde stem.'
     : 'This is a preview of the cloned voice.';
     
+  // FIX: Simplified the prompt for the TTS model for better consistency.
   const prompt = `(warm, natural) ${previewText}`;
 
-  const response = await withApiKeys(async (ai) => 
+  // FIX: Correctly structure the speechConfig payload for custom voices.
+  const response = await withApiKeyRotation(async (ai) => 
     ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: prompt }] }],
@@ -487,7 +498,7 @@ export async function generateAdText(script: ScriptLine[], episodeTitle: string,
       4.  Include 3-5 relevant and popular hashtags.
       5.  Keep the entire post concise and perfect for platforms like Instagram, X (Twitter), or Facebook.
   `;
-  const response: GenerateContentResponse = await withApiKeys(ai => 
+  const response: GenerateContentResponse = await withApiKeyRotation(ai => 
       ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: prompt
@@ -514,7 +525,7 @@ export async function generateAdScript(script: ScriptLine[], episodeTitle: strin
         5.  The script should feel energetic and exciting. Use short sentences.
         6.  Include sound effect cues in brackets, like [upbeat music fades in] or [sound of a cash register].
     `;
-    const response: GenerateContentResponse = await withApiKeys(ai => 
+    const response: GenerateContentResponse = await withApiKeyRotation(ai => 
         ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: prompt,
