@@ -1,5 +1,3 @@
-import { ScriptLine } from './App';
-
 export interface ScriptLine {
   speaker: string;
   dialogue: string;
@@ -25,15 +23,6 @@ export interface ScriptTiming {
   duration: number;
 }
 
-export interface GuestHost {
-  id: string;
-  name: string;
-  role: string;
-  gender: 'male' | 'female';
-  voice: string;
-  customSamples: CustomAudioSample[];
-}
-
 export interface Episode {
   id: string;
   title: string;
@@ -45,7 +34,12 @@ export interface Episode {
   samanthaCustomSamples: CustomAudioSample[];
   stewardVoice: string;
   stewardCustomSamples: CustomAudioSample[];
-  guestHosts: GuestHost[];
+  isThirdHostEnabled: boolean;
+  thirdHostName: string;
+  thirdHostRole: string;
+  thirdHostGender: 'male' | 'female';
+  thirdHostVoice: string;
+  thirdHostCustomSamples: CustomAudioSample[];
   // Step 2 state
   prompt: string;
   pdfText: string;

@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
-import { ScriptLine, VoiceConfig, ScriptTiming, GuestHost } from '../types';
+import { ScriptLine, VoiceConfig, ScriptTiming } from '../types';
 import { decode, encode, concatenatePcm, getPcmChunkDuration, mixAudio } from '../utils/audioUtils';
 import { getApiKeys } from './apiKeyService';
 import { BACKGROUND_AUDIO } from "../assets/backgroundAudio";
@@ -96,6 +96,12 @@ interface Branding {
     slogan?: string;
 }
 
+interface ThirdHost {
+    name: string;
+    role: string;
+    gender: 'male' | 'female';
+}
+
 type Accent = 'Default' | 'South African';
 
 
@@ -110,7 +116,7 @@ export async function generateScript(
     language: 'English' | 'Afrikaans' = 'English',
     samanthaName: string = 'Samantha',
     stewardName: string = 'Steward',
-    guestHosts?: Omit<GuestHost, 'id' | 'voice' | 'customSamples'>[],
+    thirdHost?: ThirdHost,
     accent: Accent = 'South African',
     episodeTitle?: string,
     episodeNumber?: number,
@@ -129,7 +135,7 @@ export async function generateScript(
     ` : '';
 
   const dynamicPerformanceInstructions = `
-    **HYPER-REALISM DIRECTIVE:** Your ultimate mission is to generate a script that feels completely unscripted. It must sound like eavesdropping on a genuine, spontaneous, and lively conversation between intelligent, charismatic people. THE ULTIMATE FAILURE IS A SCRIPT THAT SOUNDS LIKE IT'S BEING READ.
+    **HYPER-REALISM DIRECTIVE:** Your ultimate mission is to generate a script that feels completely unscripted. It must sound like eavesdropping on a genuine, spontaneous, and lively conversation between two intelligent, charismatic people. THE ULTIMATE FAILURE IS A SCRIPT THAT SOUNDS LIKE IT'S BEING READ.
 
     **1. DIALOGUE MECHANICS (THE SECRET SAUCE):**
     - **EMBRACE IMPERFECTION:** Real people don't speak in perfect, polished prose. This is the most important rule. Use sentence fragments, self-corrections (e.g., "And the thing is... actually, no, let me rephrase that..."), and natural fillers ("umm," "like," "you know").
@@ -165,17 +171,15 @@ export async function generateScript(
 
   const hosts = [`"${samanthaName}" (a woman)`, `"${stewardName}" (a man)`];
   const speakerEnum = [samanthaName, stewardName];
-  if (guestHosts && guestHosts.length > 0) {
-      guestHosts.forEach(guest => {
-          hosts.push(`"${guest.name}" (a ${guest.gender})`);
-          speakerEnum.push(guest.name);
-      });
+  if (thirdHost) {
+      hosts.push(`and "${thirdHost.name}" (a ${thirdHost.gender})`);
+      speakerEnum.push(thirdHost.name);
   }
 
-  const guestHostInstruction = guestHosts && guestHosts.length > 0 ? `
-    There are ${guestHosts.length} guest speaker(s) joining the conversation.
-    ${guestHosts.map(guest => `- **Name:** "${guest.name}", a ${guest.gender}. **Role:** ${guest.name}'s role is: "${guest.role}". Their contributions must be focused on this role.`).join('\n')}
-    - **Integrate Naturally:** Weave all guests into the conversation organically.
+  const thirdHostInstruction = thirdHost ? `
+    There is a third person, "${thirdHost.name}", joining the conversation.
+    - **Role:** ${thirdHost.name}'s role is: "${thirdHost.role}". Their contributions must be focused on this role.
+    - **Integrate Naturally:** Weave ${thirdHost.name} into the conversation organically.
   ` : '';
 
   const episodeContext = (episodeTitle && episodeNumber) 
@@ -187,10 +191,10 @@ export async function generateScript(
 
   const fullPrompt = `
     You are an elite podcast script writer and performance director. Your task is to generate an intellectually stimulating and natural-sounding podcast script in ${language}.
-    The podcast features the following speakers: ${hosts.join(', ')}. Their names must be used exactly as provided.
+    The podcast has two hosts: ${hosts.join(', ')}. Their names must be used exactly as provided.
     
     ${episodeContext}
-    ${guestHostInstruction}
+    ${thirdHostInstruction}
     ${topic ? `The topic for this episode is: "${topic}".` : ''}
     ${context ? `Use the following document as the primary source of information:\n\n---DOCUMENT START---\n${context}\n---DOCUMENT END---` : ''}
     
@@ -301,7 +305,7 @@ export async function generatePodcastAudio(
     stewardName: string,
     samanthaVoiceConfig: VoiceConfig, 
     stewardVoiceConfig: VoiceConfig,
-    guestHosts?: { name: string; voiceConfig: VoiceConfig }[],
+    thirdHost?: { name: string; voiceConfig: VoiceConfig; gender: 'male' | 'female' },
     accent: Accent = 'South African',
     backgroundSound?: string,
     backgroundVolume?: number,
@@ -309,18 +313,12 @@ export async function generatePodcastAudio(
     const rawAudioChunks: Uint8Array[] = [];
     const timings: ScriptTiming[] = [];
     let cumulativeTime = 0;
-
-    const voiceConfigMap = new Map<string, VoiceConfig>();
-    voiceConfigMap.set(samanthaName, samanthaVoiceConfig);
-    voiceConfigMap.set(stewardName, stewardVoiceConfig);
-    if (guestHosts) {
-        for (const guest of guestHosts) {
-            voiceConfigMap.set(guest.name, guest.voiceConfig);
-        }
-    }
     
     for (const line of script) {
-        const voiceConfig = voiceConfigMap.get(line.speaker);
+        let voiceConfig: VoiceConfig | undefined;
+        if (line.speaker === samanthaName) voiceConfig = samanthaVoiceConfig;
+        else if (line.speaker === stewardName) voiceConfig = stewardVoiceConfig;
+        else if (thirdHost && line.speaker === thirdHost.name) voiceConfig = thirdHost.voiceConfig;
         
         if (voiceConfig) {
             const base64Chunk = await generateSingleSpeakerAudio(line.dialogue, voiceConfig, line.cue);
