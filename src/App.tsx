@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, PropsWithChildren, useEffect } from 'react';
-import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, GuestHost } from './types';
+import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, GuestHost, ApiKey } from './types';
 import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice, generateQualityPreviewAudio, generateAdText, generateAdScript } from './services/geminiService';
+import { getKeys, addKey, deleteKey } from './services/apiKeyService';
 import { extractTextFromPdf } from './services/pdfService';
 import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence } from './utils/audioUtils';
 import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon, SettingsIcon } from './components/Icons';
@@ -1031,6 +1032,133 @@ const Footer: React.FC<{ onCreatorClick: () => void }> = ({ onCreatorClick }) =>
     );
 };
 
+const SettingsTab = () => {
+    const [keys, setKeys] = useState<ApiKey[]>([]);
+    const [newKey, setNewKey] = useState('');
+    const [newLabel, setNewLabel] = useState('');
+    const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(true);
+
+    const loadKeys = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const storedKeys = await getKeys();
+            setKeys(storedKeys);
+        } catch (e: any) {
+            setError('Failed to load API keys from the database. ' + e.message);
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadKeys();
+    }, [loadKeys]);
+
+    const handleAddKey = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newKey.trim() || !newLabel.trim()) {
+            setError('Both API Key and Label fields are required.');
+            return;
+        }
+        setError('');
+        try {
+            const keyToAdd: ApiKey = {
+                id: `key_${Date.now()}`,
+                provider: 'Gemini',
+                key: newKey.trim(),
+                label: newLabel.trim(),
+            };
+            await addKey(keyToAdd);
+            setNewKey('');
+            setNewLabel('');
+            await loadKeys();
+        } catch (e: any) {
+            setError('Failed to add the new key. ' + e.message);
+        }
+    };
+
+    const handleDeleteKey = async (keyId: string) => {
+        setError('');
+        try {
+            await deleteKey(keyId);
+            await loadKeys();
+        } catch (e: any) {
+            setError('Failed to delete the key. ' + e.message);
+        }
+    };
+
+    const maskKey = (key: string) => {
+        if (key.length <= 8) return '****';
+        return `${key.slice(0, 4)}...${key.slice(-4)}`;
+    };
+
+    return (
+        <div className="max-w-4xl mx-auto text-center py-12 fade-in">
+            <Card title="API Key Management" icon={<SettingsIcon />}>
+                <p className="text-text-secondary -mt-4">
+                    Manage your Gemini API keys here. The application will use these in addition to any keys configured in the environment. Keys are stored securely in your browser's local storage.
+                </p>
+                {error && <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-4"><ErrorIcon /><p className="font-semibold text-red-300">{error}</p></div>}
+                
+                <form onSubmit={handleAddKey} className="space-y-4 text-left p-6 bg-zinc-900/50 border border-zinc-800 rounded-lg">
+                    <h3 className="text-lg font-bold text-text-primary">Add New Key</h3>
+                    <div>
+                        <label htmlFor="key-label" className="block text-sm font-bold text-text-primary mb-2">Label</label>
+                        <input
+                            type="text"
+                            id="key-label"
+                            value={newLabel}
+                            onChange={(e) => setNewLabel(e.target.value)}
+                            placeholder="e.g., My Personal Key"
+                            className="w-full text-lg bg-input-background placeholder:text-text-secondary border border-zinc-700 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold transition"
+                        />
+                    </div>
+                    <div>
+                        <label htmlFor="api-key" className="block text-sm font-bold text-text-primary mb-2">API Key</label>
+                        <input
+                            type="password"
+                            id="api-key"
+                            value={newKey}
+                            onChange={(e) => setNewKey(e.target.value)}
+                            placeholder="Enter your Gemini API key"
+                            className="w-full text-lg bg-input-background placeholder:text-text-secondary border border-zinc-700 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold transition"
+                        />
+                    </div>
+                    <div className="flex justify-end">
+                        <button type="submit" className="bg-primary text-on-primary font-bold py-3 px-6 rounded-lg hover:bg-primary-hover transition flex items-center gap-2 disabled:bg-zinc-600 shadow-primary-glow">
+                            <PlusIcon /> Add Key
+                        </button>
+                    </div>
+                </form>
+
+                <div className="space-y-4 pt-6 border-t border-zinc-800">
+                    <h3 className="text-xl font-bold text-text-primary">Saved Keys</h3>
+                    {isLoading ? (
+                        <div className="flex justify-center items-center p-8"><LoaderIcon /></div>
+                    ) : keys.length === 0 ? (
+                        <p className="text-text-secondary">No API keys saved yet.</p>
+                    ) : (
+                        <ul className="space-y-3 text-left">
+                            {keys.map(apiKey => (
+                                <li key={apiKey.id} className="flex justify-between items-center bg-zinc-900/50 p-4 rounded-lg border border-zinc-800">
+                                    <div className="flex flex-col">
+                                        <span className="font-bold text-text-primary">{apiKey.label}</span>
+                                        <span className="text-sm text-text-secondary font-mono">{maskKey(apiKey.key)}</span>
+                                    </div>
+                                    <button onClick={() => handleDeleteKey(apiKey.id)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition" aria-label={`Delete key ${apiKey.label}`}>
+                                        <TrashIcon />
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            </Card>
+        </div>
+    );
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('creator');
   const [currentStep, setCurrentStep] = useState(1);
@@ -1545,7 +1673,7 @@ export default function App() {
         )}
         
         {activeTab === 'editor' && <AudioEditorTab />}
-        {activeTab === 'settings' && isSettingsTabVisible && <div />}
+        {activeTab === 'settings' && isSettingsTabVisible && <SettingsTab />}
         {activeTab === 'about' && <AboutTab />}
 
       </div>
