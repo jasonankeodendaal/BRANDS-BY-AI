@@ -685,7 +685,6 @@ const StepStudio: React.FC<StepStudioProps> = ({
         if (!audioData) return;
         
         const rawData = decode(audioData);
-        // FIX: Use robust Int16Array constructor to prevent RangeError
         const pcm = new Int16Array(rawData.buffer, rawData.byteOffset, rawData.length / 2);
         
         const width = waveformRef.current?.getBoundingClientRect().width || 0;
@@ -2043,7 +2042,7 @@ const AboutTab = () => {
                     <div className="border-t-2 border-zinc-800 pt-12">
                          <h3 className="text-4xl">Tips for Professional Results</h3>
                         <ul className="list-none p-0 mt-8 space-y-6">
-                            <li><strong className="text-gold">For Voice Cloning:</strong> Record in a quiet space using a quality microphone. Provide 15-30 seconds of clear, natural speech without background noise. The cleaner the sample, the more realistic the clone.</li>
+                            <li><strong className="text-gold">For Voice Cloning:</strong> Record in a quiet space using a quality microphone. Provide 15-30 seconds of clear, natural speech without background noise. The cleaner the sample, the better the clone will be.</li>
                             <li><strong className="text-gold">For Scripting:</strong> Be descriptive in your prompts. Instead of "Artificial Intelligence," try "The ethical implications of AI in modern art." This specificity guides the AI to produce more focused and interesting content.</li>
                             <li><strong className="text-gold">For Editing:</strong> Always listen with headphones to catch subtle imperfections. When cutting, zoom in on the waveform to ensure you're not clipping the start or end of a word. Make small, incremental adjustments and use the Undo feature freely.</li>
                         </ul>

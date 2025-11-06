@@ -15,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
 
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script>
       tailwind.config = {
         theme: {
@@ -152,6 +152,8 @@
         }
       }
     </style>
+    <!-- Add Babel for in-browser transpilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script type="importmap">
 {
   "imports": {
@@ -174,6 +176,7 @@
     <div id="root"></div>
     <!-- pdf.js library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script type="module" src="/src/index.tsx"></script>
+    <!-- Change script type to text/babel to enable transpilation -->
+    <script type="text/babel" data-type="module" src="/src/index.tsx"></script>
   </body>
 </html>

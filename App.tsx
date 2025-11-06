@@ -12,8 +12,7 @@ const Logo = () => (
     <div className="relative flex items-center justify-center" aria-label="Brands by Ai">
         {/* Spotlight Effect */}
         <div 
-            className="absolute -top-1/4 w-[400px] h-[300px] bg-[radial-gradient(ellipse_at_center,rgba(236,179,101,0.1)_0%,rgba(236,179,101,0)_70%)] blur-3xl opacity-80"
-            aria-hidden="true" 
+            
         />
         <img 
             src="https://i.ibb.co/zHWF2Hc2/90378e8b-4c88-4160-860d-4d510bdded49.png" 

@@ -1,6 +1,6 @@
 // A more robust service worker for caching and offline support
 
-const CACHE_NAME = 'ai-podcast-studio-v3'; // Bumped version to invalidate all old caches
+const CACHE_NAME = 'ai-podcast-studio-v5'; // Bumped version to invalidate all old caches
 const urlsToCache = [
   '/',
   '/index.html',
@@ -48,35 +48,31 @@ self.addEventListener('activate', event => {
 });
 
 // Fetch event: Handles all network requests from the app.
-// We use a "Network First, then Cache" strategy.
+// We use a "Stale-While-Revalidate" strategy.
 self.addEventListener('fetch', event => {
-  // We only want to cache GET requests.
+  // We only want to handle GET requests.
   if (event.request.method !== 'GET') {
     return;
   }
 
   event.respondWith(
-    // 1. Try to fetch from the network
-    fetch(event.request)
-      .then(networkResponse => {
-        // If the fetch is successful, we clone the response and cache it.
-        const responseToCache = networkResponse.clone();
-        caches.open(CACHE_NAME)
-          .then(cache => {
-            // We put the request and its response in the cache.
-            cache.put(event.request, responseToCache);
-          });
-        // And return the original network response to the browser.
-        return networkResponse;
-      })
-      .catch(() => {
-        // 2. If the network fails (e.g., offline), try to find a match in the cache.
-        return caches.match(event.request)
-          .then(cachedResponse => {
-            // If we find a response in the cache, return it.
-            // Otherwise, the fetch will fail as it normally would.
-            return cachedResponse || Response.error();
-          });
-      })
+    caches.open(CACHE_NAME).then(cache => {
+      // 1. Return from cache immediately if possible.
+      return cache.match(event.request).then(cachedResponse => {
+        // 2. Simultaneously, fetch from the network to update the cache for next time.
+        const fetchPromise = fetch(event.request).then(networkResponse => {
+          // If the fetch is successful, update the cache.
+          cache.put(event.request, networkResponse.clone());
+          return networkResponse;
+        }).catch(err => {
+          // The network fetch failed, which is okay if we have a cached response.
+          // Log the error for debugging.
+          console.warn('Service Worker: Network fetch failed.', err);
+        });
+
+        // Return the cached response if it exists, otherwise wait for the network.
+        return cachedResponse || fetchPromise;
+      });
+    })
   );
 });

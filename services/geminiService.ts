@@ -279,16 +279,20 @@ async function generateSingleSpeakerAudio(
   // This is more reliable and aligns with best practices for the gemini-2.5-flash-preview-tts model.
   const performableText = cue ? `(${cue}) ${text}` : text;
 
-  const speechConfigPayload: {
-    voiceConfig?: { prebuiltVoiceConfig: { voiceName: string } };
-    customVoice?: { audio: { data: string; mimeType: string } };
-  } = {};
-
-  if (voiceConfig.type === 'custom') {
-    speechConfigPayload.customVoice = { audio: { data: voiceConfig.data, mimeType: voiceConfig.mimeType } };
-  } else {
-    speechConfigPayload.voiceConfig = { prebuiltVoiceConfig: { voiceName: voiceConfig.name } };
-  }
+  // FIX: Correctly structure the speechConfig payload. The `voiceConfig` object contains
+  // either a `customVoice` or a `prebuiltVoiceConfig` object. This resolves the TypeScript error.
+  const speechConfigPayload = {
+    voiceConfig:
+      voiceConfig.type === 'custom'
+        ? {
+            customVoice: {
+              audio: { data: voiceConfig.data, mimeType: voiceConfig.mimeType },
+            },
+          }
+        : {
+            prebuiltVoiceConfig: { voiceName: voiceConfig.name },
+          },
+  };
 
   const response = await withApiKeyRotation(async (ai) =>
     ai.models.generateContent({
@@ -453,6 +457,7 @@ export async function previewClonedVoice(
   // FIX: Simplified the prompt for the TTS model for better consistency.
   const prompt = `(warm, natural) ${previewText}`;
 
+  // FIX: Correctly structure the speechConfig payload for custom voices.
   const response = await withApiKeyRotation(async (ai) => 
     ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
@@ -460,7 +465,9 @@ export async function previewClonedVoice(
         config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: {
-            customVoice: { audio: { data: customVoice.data, mimeType: customVoice.mimeType } }
+            voiceConfig: {
+              customVoice: { audio: { data: customVoice.data, mimeType: customVoice.mimeType } }
+            }
         },
         },
     })
