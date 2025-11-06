@@ -1657,8 +1657,8 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
     const waveformRef = useRef<HTMLCanvasElement>(null);
     const waveformContainerRef = useRef<HTMLDivElement>(null);
     const [selection, setSelection] = useState<{ start: number, end: number} | null>(null);
+    
     const isDraggingRef = useRef(false);
-    const [isTouch, setIsTouch] = useState(false);
     const [zoom, setZoom] = useState(1);
 
 
@@ -1673,7 +1673,8 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
             const rawData = decode(audioData);
             const wavBlob = pcmToWav(rawData, 24000, 1, 16);
             const url = URL.createObjectURL(wavBlob);
-            audioRef.current.src = url;
+            const currentAudio = audioRef.current;
+            currentAudio.src = url;
             return () => URL.revokeObjectURL(url);
         }
     }, [audioData]);
@@ -1682,7 +1683,10 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         const canvas = waveformRef.current;
         if (!canvas) return;
         const dpr = window.devicePixelRatio || 1;
-        const rect = canvas.getBoundingClientRect();
+        const parent = waveformContainerRef.current;
+        if (!parent) return;
+
+        const rect = parent.getBoundingClientRect();
         canvas.width = rect.width * dpr;
         canvas.height = rect.height * dpr;
         const ctx = canvas.getContext('2d');
@@ -1695,6 +1699,7 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         
         ctx.clearRect(0, 0, width, height);
 
+        // Draw full waveform in gray
         ctx.strokeStyle = '#a1a1aa';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -1735,7 +1740,7 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
       const audio = audioRef.current;
       if (!audio) return;
       
-      const handleLoadedMetadata = () => { if (isFinite(audio.duration)) setDuration(audio.duration); setCurrentTime(audio.currentTime); };
+      const handleLoadedMetadata = () => { if (isFinite(audio.duration)) setDuration(audio.duration); };
       const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
       const handlePlay = () => setIsPlaying(true);
       const handlePause = () => setIsPlaying(false);
@@ -1760,84 +1765,104 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         if (!audioData) return;
         
         const rawData = decode(audioData);
-        const pcm = new Int16Array(rawData.buffer);
+        // Use the correct buffer view to avoid potential out-of-bounds access
+        const pcm = new Int16Array(rawData.buffer, rawData.byteOffset, rawData.length / 2);
         const channelData = new Float32Array(pcm.length);
         for (let i = 0; i < pcm.length; i++) {
             channelData[i] = pcm[i] / 32768.0;
         }
 
-        const samples = Math.floor(400 * zoom);
+        const canvas = waveformRef.current;
+        if (!canvas) return;
+        const parent = waveformContainerRef.current;
+        if (!parent) return;
+
+        // Dynamic sample count based on visual width to maintain detail
+        const samples = Math.floor(parent.getBoundingClientRect().width * zoom);
         const blockSize = Math.floor(channelData.length / samples);
         const filteredData = [];
         for (let i = 0; i < samples; i++) {
             let sum = 0;
             for (let j = 0; j < blockSize; j++) {
-                sum = sum + Math.abs(channelData[blockSize * i + j]);
+                sum += Math.abs(channelData[blockSize * i + j] || 0);
             }
             filteredData.push(sum / blockSize);
         }
 
-        const multiplier = Math.pow(Math.max(...filteredData), -1) || 1;
+        const multiplier = Math.pow(Math.max(...filteredData, 0.00001), -1);
         const normalizedData = filteredData.map(n => n * multiplier * 2 - 1);
         
         drawWaveform(normalizedData);
         
-    }, [audioData, drawWaveform, currentTime, selection, zoom]);
+    }, [audioData, drawWaveform, currentTime, selection, zoom, duration]);
 
-    const handleWaveformInteraction = useCallback((clientX: number, type: 'down' | 'move' | 'up') => {
+    // Resize observer to redraw waveform on container resize
+    useEffect(() => {
+        const container = waveformContainerRef.current;
+        if (!container) return;
+        const resizeObserver = new ResizeObserver(() => {
+            // This forces a redraw by toggling zoom slightly, could be improved but effective
+            setZoom(z => z);
+        });
+        resizeObserver.observe(container);
+        return () => resizeObserver.disconnect();
+    }, [drawWaveform, audioData, currentTime, selection, zoom]);
+
+    const handleWaveformClick = useCallback((clientX: number) => {
         const container = waveformContainerRef.current;
         if (!container || duration === 0) return;
-
         const rect = container.getBoundingClientRect();
-        const scrollLeft = container.scrollLeft;
-        const totalWidth = container.scrollWidth;
+        const position = (clientX - rect.left) / rect.width;
+        handleSeek(position * duration);
+    }, [duration]);
+    
+    const handleInteractionStart = useCallback((clientX: number) => {
+        isDraggingRef.current = true;
+        const container = waveformContainerRef.current;
+        if (!container || duration === 0) return;
+        const rect = container.getBoundingClientRect();
+        const time = Math.max(0, Math.min(((clientX - rect.left) / rect.width) * duration, duration));
+        setSelection({ start: time, end: time });
+    }, [duration]);
+    
+    const handleInteractionMove = useCallback((clientX: number) => {
+        if (!isDraggingRef.current) return;
+        const container = waveformContainerRef.current;
+        if (!container || duration === 0) return;
+        const rect = container.getBoundingClientRect();
+        const time = Math.max(0, Math.min(((clientX - rect.left) / rect.width) * duration, duration));
+        setSelection(s => s ? { ...s, end: time } : null);
+    }, [duration]);
 
-        const relativeX = clientX - rect.left;
-        const absoluteX = relativeX + scrollLeft;
-        
-        const time = Math.max(0, Math.min((absoluteX / totalWidth) * duration, duration));
-
-        if (type === 'down') {
-            isDraggingRef.current = true;
-            setSelection({ start: time, end: time });
-        } else if (type === 'move' && isDraggingRef.current && selection) {
-            setSelection({ ...selection, end: time });
-        } else if (type === 'up') {
-            isDraggingRef.current = false;
-            if (selection && selection.start > selection.end) {
-                setSelection({ start: selection.end, end: selection.start });
+    const handleInteractionEnd = useCallback(() => {
+        isDraggingRef.current = false;
+        setSelection(s => {
+            if (s && s.start > s.end) {
+                return { start: s.end, end: s.start };
             }
-        }
-    }, [duration, selection]);
+            return s;
+        });
+    }, []);
 
     const togglePlayPause = async () => {
-        if (!audioRef.current) return;
+        const audio = audioRef.current;
+        if (!audio) return;
         try {
-            if (audioRef.current.paused) {
-                await audioRef.current.play();
-            } else {
-                audioRef.current.pause();
-            }
+            if (audio.paused) await audio.play();
+            else audio.pause();
         } catch (error: any) {
-            if (error.name !== 'AbortError') {
-                console.error("Error playing/pausing audio:", error);
-            }
+            if (error.name !== 'AbortError') console.error("Error playing/pausing audio:", error);
         }
     };
     
     const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newVolume = parseFloat(e.target.value);
         setVolume(newVolume);
-        if (audioRef.current) {
-            audioRef.current.volume = newVolume;
-        }
+        if (audioRef.current) audioRef.current.volume = newVolume;
     };
 
     const handleSeek = (time: number) => {
-        if (audioRef.current) {
-            audioRef.current.currentTime = time;
-            setCurrentTime(time);
-        }
+        if (audioRef.current) audioRef.current.currentTime = time;
     };
 
     const handleAudioEdit = (type: 'cut' | 'trim' | 'silence' | 'fadeIn' | 'fadeOut') => {
@@ -1845,19 +1870,19 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         setAudioHistory(prev => [...prev, audioData]);
         
         const pcmData = decode(audioData);
-        const bytesPerSample = 2; // 16-bit
         const sampleRate = 24000;
+        const bytesPerSample = 2; // 16-bit
         
         let startByte = Math.floor(selection.start * sampleRate * bytesPerSample);
         let endByte = Math.floor(selection.end * sampleRate * bytesPerSample);
         startByte -= startByte % 2;
         endByte -= endByte % 2;
 
-        let newData;
         const part1 = pcmData.slice(0, startByte);
         const selectedPart = pcmData.slice(startByte, endByte);
         const part2 = pcmData.slice(endByte);
 
+        let newData;
         switch(type) {
             case 'cut':
                 newData = concatenatePcm([part1, part2]);
@@ -1866,31 +1891,27 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
                 newData = selectedPart;
                 break;
             case 'silence':
-                const silenceDuration = selection.end - selection.start;
-                const silence = generateSilence(silenceDuration, sampleRate, 16);
+                const silence = generateSilence(selection.end - selection.start, sampleRate, 16);
                 newData = concatenatePcm([part1, silence, part2]);
                 break;
             case 'fadeIn':
-                const fadedInPart = applyFade(selectedPart, 'in');
-                newData = concatenatePcm([part1, fadedInPart, part2]);
+                newData = concatenatePcm([part1, applyFade(selectedPart, 'in'), part2]);
                 break;
             case 'fadeOut':
-                const fadedOutPart = applyFade(selectedPart, 'out');
-                newData = concatenatePcm([part1, fadedOutPart, part2]);
+                newData = concatenatePcm([part1, applyFade(selectedPart, 'out'), part2]);
                 break;
-            default:
-                newData = pcmData;
         }
-
         setAudioData(encode(newData));
         setSelection(null);
     };
 
     const handleUndo = () => {
         if (audioHistory.length > 0) {
-            const lastState = audioHistory[audioHistory.length - 1];
-            setAudioData(lastState);
-            setAudioHistory(prev => prev.slice(0, -1));
+            const lastState = audioHistory.pop();
+            if (lastState) {
+                setAudioData(lastState);
+                setAudioHistory([...audioHistory]);
+            }
         }
     };
     
@@ -1907,7 +1928,7 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     };
-
+    
     return (
       <div className="max-w-4xl mx-auto text-center py-12 fade-in">
         <Card title="Audio Editor" icon={<EditIcon />}>
@@ -1930,39 +1951,44 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
                         step="1"
                         value={zoom} 
                         onChange={(e) => setZoom(parseFloat(e.target.value))}
-                        className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold"
+                        className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold"
                         aria-label="Zoom waveform"
                     />
                     <ZoomInIcon />
                 </div>
-                <div ref={waveformContainerRef} className="w-full overflow-x-auto">
+                <div 
+                    ref={waveformContainerRef} 
+                    className="w-full h-32 md:h-40 bg-zinc-800/20 rounded-lg overflow-hidden"
+                    style={{ touchAction: 'pan-y' }} // Allow vertical scroll but capture horizontal
+                    onMouseDown={(e) => handleInteractionStart(e.clientX)}
+                    onMouseMove={(e) => handleInteractionMove(e.clientX)}
+                    onMouseUp={handleInteractionEnd}
+                    onMouseLeave={handleInteractionEnd}
+                    onTouchStart={(e) => handleInteractionStart(e.touches[0].clientX)}
+                    onTouchMove={(e) => handleInteractionMove(e.touches[0].clientX)}
+                    onTouchEnd={handleInteractionEnd}
+                    onClick={(e) => !selection && handleWaveformClick(e.clientX)}
+                >
                     <canvas 
                         ref={waveformRef} 
-                        className="h-24 md:h-32 cursor-text touch-none"
+                        className="w-full h-full cursor-text"
                         style={{ width: `${zoom * 100}%` }}
-                        onMouseDown={(e) => { setIsTouch(false); handleWaveformInteraction(e.clientX, 'down'); }} 
-                        onMouseMove={(e) => !isTouch && isDraggingRef.current && handleWaveformInteraction(e.clientX, 'move')} 
-                        onMouseUp={(e) => !isTouch && handleWaveformInteraction(e.clientX, 'up')} 
-                        onMouseLeave={() => { if(!isTouch) isDraggingRef.current = false; }}
-                        onTouchStart={(e) => { setIsTouch(true); handleWaveformInteraction(e.touches[0].clientX, 'down'); }}
-                        onTouchMove={(e) => handleWaveformInteraction(e.touches[0].clientX, 'move')}
-                        onTouchEnd={(e) => handleWaveformInteraction(e.changedTouches[0].clientX, 'up')}
-                    ></canvas>
+                    />
                 </div>
                 <div className="flex justify-between text-sm text-text-secondary font-mono">
                     <span>{formatTime(currentTime)}</span>
                     <span>{formatTime(duration)}</span>
                 </div>
-                <div className="flex items-center justify-center gap-4">
-                    <button onClick={() => handleSeek(Math.max(0, currentTime - 5))} className="p-3 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><RewindIcon /></button>
-                    <button onClick={togglePlayPause} className="p-5 bg-primary text-on-primary rounded-full hover:bg-primary-hover transition transform hover:scale-110 shadow-primary-glow">
+                <div className="flex items-center justify-center gap-6">
+                    <button onClick={() => handleSeek(Math.max(0, currentTime - 5))} className="p-4 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><RewindIcon /></button>
+                    <button onClick={togglePlayPause} className="p-6 bg-primary text-on-primary rounded-full hover:bg-primary-hover transition transform hover:scale-110 shadow-primary-glow">
                         {isPlaying ? <PauseIcon /> : <PlayIcon />}
                     </button>
-                    <button onClick={() => handleSeek(Math.min(duration, currentTime + 5))} className="p-3 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><ForwardIcon /></button>
+                    <button onClick={() => handleSeek(Math.min(duration, currentTime + 5))} className="p-4 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><ForwardIcon /></button>
                 </div>
                  <div className="flex items-center gap-4 pt-4">
                     <button onClick={() => handleVolumeChange({ target: { value: volume > 0 ? '0' : '1' } } as any)}>{volume > 0 ? <VolumeHighIcon /> : <VolumeMuteIcon />}</button>
-                    <input type="range" min="0" max="1" step="0.01" value={volume} onChange={handleVolumeChange} className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" />
+                    <input type="range" min="0" max="1" step="0.01" value={volume} onChange={handleVolumeChange} className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" />
                 </div>
             </div>
 
