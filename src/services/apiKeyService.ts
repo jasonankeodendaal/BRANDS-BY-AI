@@ -1,42 +1,38 @@
+import { get, set } from 'idb-keyval';
 import { ApiKey } from '../types';
 
-const API_KEY_STORAGE_KEY = 'user-api-keys';
+const DB_KEY = 'user-api-keys';
 
 /**
- * Retrieves the list of API keys from localStorage.
- * @returns An array of ApiKey objects.
+ * Retrieves all stored API keys from IndexedDB.
+ * @returns A promise that resolves to an array of ApiKey objects.
  */
-export function getApiKeys(): ApiKey[] {
-    try {
-        const storedKeys = localStorage.getItem(API_KEY_STORAGE_KEY);
-        if (storedKeys) {
-            const parsed = JSON.parse(storedKeys);
-            if (Array.isArray(parsed) && parsed.every(item => 
-                typeof item === 'object' && 
-                item !== null &&
-                'key' in item && 
-                'id' in item &&
-                'name' in item &&
-                'type' in item
-            )) {
-                return parsed;
-            }
-        }
-    } catch (error) {
-        console.error("Failed to parse API keys from localStorage:", error);
-        localStorage.removeItem(API_KEY_STORAGE_KEY);
-    }
-    return [];
+export async function getKeys(): Promise<ApiKey[]> {
+  const keys = await get<ApiKey[]>(DB_KEY);
+  return keys || [];
 }
 
 /**
- * Saves a list of API keys to localStorage.
- * @param keys An array of ApiKey objects to save.
+ * Adds a new API key to the stored list.
+ * @param newKey The ApiKey object to add.
+ * @returns A promise that resolves when the operation is complete.
  */
-export function saveApiKeys(keys: ApiKey[]): void {
-    try {
-        localStorage.setItem(API_KEY_STORAGE_KEY, JSON.stringify(keys));
-    } catch (error) {
-        console.error("Failed to save API keys to localStorage:", error);
-    }
+export async function addKey(newKey: ApiKey): Promise<void> {
+  const keys = await getKeys();
+  // Prevent adding duplicate keys
+  if (!keys.some(k => k.key === newKey.key && k.provider === newKey.provider)) {
+    const updatedKeys = [...keys, newKey];
+    await set(DB_KEY, updatedKeys);
+  }
+}
+
+/**
+ * Deletes an API key from the stored list by its ID.
+ * @param keyId The unique ID of the key to delete.
+ * @returns A promise that resolves when the operation is complete.
+ */
+export async function deleteKey(keyId: string): Promise<void> {
+  const keys = await getKeys();
+  const updatedKeys = keys.filter(k => k.id !== keyId);
+  await set(DB_KEY, updatedKeys);
 }

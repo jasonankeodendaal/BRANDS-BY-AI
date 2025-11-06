@@ -9,11 +9,12 @@ export type PrebuiltVoice = { type: 'prebuilt'; name: string };
 export type CustomVoice = { type: 'custom'; data: string; mimeType: string };
 export type VoiceConfig = PrebuiltVoice | CustomVoice;
 
+// Interface for managing custom audio state from either recording or upload
 export interface CustomAudioSample {
   url: string;
   base64: string;
   mimeType: string;
-  name: string;
+  name: string; // 'Your Recording' or the uploaded file name
 }
 
 export interface ScriptTiming {
@@ -30,8 +31,6 @@ export interface GuestHost {
   voice: string;
   customSamples: CustomAudioSample[];
 }
-
-export type AiProvider = 'gemini' | 'huggingface';
 
 export interface Episode {
   id: string;
@@ -53,7 +52,6 @@ export interface Episode {
   customRules: string;
   language: 'English' | 'Afrikaans';
   episodeLength: number;
-  aiProvider: AiProvider;
   // Step 3 state
   script: ScriptLine[] | null;
   scriptTimings: ScriptTiming[] | null;
@@ -62,7 +60,6 @@ export interface Episode {
   website: string;
   slogan: string;
   backgroundSound: string;
-  backgroundVolume: number;
   // Step 4 state
   audioData: string | null;
   adText?: string | null;
@@ -72,8 +69,8 @@ export interface Episode {
 export type EffectType = 'volume' | 'noise' | 'speed';
 
 export interface ApiKey {
-  key: string;
   id: string;
-  name: string;
-  type: 'gemini' | 'huggingface';
+  provider: string;
+  key: string;
+  label: string;
 }
