@@ -1,11 +1,14 @@
 import React, { useState, useRef, useCallback, PropsWithChildren, useEffect } from 'react';
-import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, GuestHost } from './types';
+import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, GuestHost, ApiKey } from './types';
 import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice, generateQualityPreviewAudio, generateAdText, generateAdScript } from './services/geminiService';
 import { extractTextFromPdf } from './services/pdfService';
 import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence } from './utils/audioUtils';
-import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, DotsIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon } from './components/Icons';
+import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, DotsIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon, SettingsIcon } from './components/Icons';
+import { useFileSystem } from './hooks/useFileSystem';
+import * as apiKeyService from './services/apiKeyService';
+import { BACKGROUND_AUDIO } from './assets/backgroundAudio';
 
-type ActiveTab = 'creator' | 'editor' | 'about';
+type ActiveTab = 'creator' | 'editor' | 'settings' | 'about';
 
 const Logo = () => (
     <div className="relative flex items-center justify-center" aria-label="Brands by Ai">
@@ -482,11 +485,16 @@ interface StepScriptAndAudioProps {
   setScript: (script: ScriptLine[]) => void;
   setCurrentStep: (step: number) => void;
   handleGenerateAudio: () => void;
+  backgroundSound: string;
+  setBackgroundSound: (sound: string) => void;
+  backgroundVolume: number;
+  setBackgroundVolume: (volume: number) => void;
 }
 
 const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
   error, isLoadingAudio, brandedName, setBrandedName, contactDetails, setContactDetails, website,
-  setWebsite, slogan, setSlogan, script, setScript, setCurrentStep, handleGenerateAudio
+  setWebsite, slogan, setSlogan, script, setScript, setCurrentStep, handleGenerateAudio,
+  backgroundSound, setBackgroundSound, backgroundVolume, setBackgroundVolume
 }) => {
     const [isEditing, setIsEditing] = useState(false);
     if (!script) return null;
@@ -498,7 +506,7 @@ const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
                 {isLoadingAudio ? (
                     <div className="bg-surface rounded-xl p-8 flex flex-col items-center justify-center gap-4 text-center">
                         <LoaderIcon />
-                        <p className="text-lg text-text-secondary">Synthesizing audio...</p>
+                        <p className="text-lg text-text-secondary">Synthesizing & mixing audio...</p>
                         <p className="text-sm text-text-secondary">This can take a few minutes for longer scripts.</p>
                     </div>
                 ) : (
@@ -509,8 +517,31 @@ const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
                             <input type="text" placeholder="Website (e.g., yoursite.com)" value={website} onChange={(e) => setWebsite(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Slogan" value={slogan} onChange={(e) => setSlogan(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                         </div>
-                         <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg text-center text-sm text-text-secondary">
-                            <p>To enable advanced features like interactive script playback, background audio is not available at this step.</p>
+                         <div className="space-y-4 pt-8 border-t border-zinc-800">
+                            <h3 className="text-lg font-semibold text-text-primary">Background Audio Mixer</h3>
+                            <div>
+                                <label htmlFor="bg-sound" className="block text-sm font-medium text-text-secondary mb-2">TRACK</label>
+                                <select id="bg-sound" value={backgroundSound} onChange={e => setBackgroundSound(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
+                                    <option value="none">None</option>
+                                    {Object.entries(BACKGROUND_AUDIO).map(([key, track]) => (
+                                        <option key={key} value={key}>{track.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                             <div>
+                                <label htmlFor="bg-volume" className="block text-sm font-medium text-text-secondary mb-2">VOLUME: <span className="font-mono text-gold">{Math.round(backgroundVolume * 100)}%</span></label>
+                                <input 
+                                    type="range" 
+                                    id="bg-volume"
+                                    min="0"
+                                    max="1"
+                                    step="0.01"
+                                    value={backgroundVolume}
+                                    onChange={e => setBackgroundVolume(parseFloat(e.target.value))}
+                                    className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold"
+                                    disabled={backgroundSound === 'none'}
+                                />
+                            </div>
                         </div>
                         <div className="pt-8 border-t border-zinc-800 flex justify-between items-center">
                             <button onClick={() => { setScript([]); setCurrentStep(2); }} className="font-bold py-4 px-10 rounded-lg hover:bg-zinc-800 transition flex items-center gap-2 text-lg">
@@ -1032,7 +1063,8 @@ const Footer: React.FC<{ onCreatorClick: () => void }> = ({ onCreatorClick }) =>
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('creator');
   const [currentStep, setCurrentStep] = useState(1);
-  
+  const { connectFolder, disconnectFolder, directoryHandle, writeFile, listFiles, isSupported } = useFileSystem();
+
   // Step 1
   const [samanthaName, setSamanthaName] = useState('Samantha');
   const [stewardName, setStewardName] = useState('Steward');
@@ -1073,7 +1105,9 @@ export default function App() {
   const [contactDetails, setContactDetails] = useState('');
   const [website, setWebsite] = useState('');
   const [slogan, setSlogan] = useState('');
-  
+  const [backgroundSound, setBackgroundSound] = useState('none');
+  const [backgroundVolume, setBackgroundVolume] = useState(0.1);
+
   // Step 4
   const [audioData, setAudioData] = useState<string | null>(null);
   const [scriptTimings, setScriptTimings] = useState<ScriptTiming[] | null>(null);
@@ -1085,11 +1119,12 @@ export default function App() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [loadedEpisodeId, setLoadedEpisodeId] = useState<string | null>(null);
 
-  // Global
+  // Global & Settings
   const [isLoadingScript, setIsLoadingScript] = useState<boolean>(false);
   const [isLoadingAudio, setIsLoadingAudio] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [isCreatorPopupVisible, setIsCreatorPopupVisible] = useState(false);
+  const [userApiKeys, setUserApiKeys] = useState<ApiKey[]>(apiKeyService.getApiKeys());
 
   const femaleVoices = [
       { name: 'Kore', label: 'Twitch Streamer (Female, Energetic)' },
@@ -1112,6 +1147,7 @@ export default function App() {
       setGuestHosts([]); setGuestStates({});
       setScript(null); setAudioData(null); setScriptTimings(null);
       setBrandedName('Brands by Ai'); setContactDetails(''); setWebsite(''); setSlogan('');
+      setBackgroundSound('none'); setBackgroundVolume(0.1);
       setError(''); setIsLoadingScript(false); setIsLoadingAudio(false);
       setAreTimingsStale(false); setAdText(null); setAdScript(null);
       
@@ -1133,41 +1169,29 @@ export default function App() {
     setCurrentStep(1);
   };
   
+  const loadAllEpisodes = useCallback(async () => {
+      let loadedEpisodes: Episode[] = [];
+      if (directoryHandle) {
+          loadedEpisodes = await listFiles();
+      } else {
+           try {
+              const savedEpisodes = localStorage.getItem('podcastEpisodes');
+              if (savedEpisodes) loadedEpisodes = JSON.parse(savedEpisodes);
+          } catch (e) { console.error("Failed to load from localStorage", e); }
+      }
+      setEpisodes(loadedEpisodes);
+      if (loadedEpisodes.length > 0) {
+        const maxEpNum = Math.max(...loadedEpisodes.map(e => e.episodeNumber));
+        setEpisodeNumber(maxEpNum + 1);
+      } else {
+        setEpisodeNumber(1);
+      }
+  }, [directoryHandle, listFiles]);
+  
   useEffect(() => {
-    try {
-        const savedEpisodes = localStorage.getItem('podcastEpisodes');
-        if (savedEpisodes) {
-            const parsed = JSON.parse(savedEpisodes);
-            setEpisodes(parsed);
-            if (parsed.length > 0) {
-                const maxEpNum = Math.max(...parsed.map((e: Episode) => e.episodeNumber));
-                setEpisodeNumber(maxEpNum + 1);
-            }
-        }
-    } catch (error) {
-        console.error("Failed to load episodes from localStorage", error);
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-        const storableEpisodes = episodes.map(ep => {
-            // Exclude large data strings to avoid exceeding localStorage quota.
-            const { audioData, samanthaCustomSamples, stewardCustomSamples, guestHosts, ...storableEpisode } = ep;
-            return { 
-                ...storableEpisode, 
-                audioData: null,
-                samanthaCustomSamples: [],
-                stewardCustomSamples: [],
-                guestHosts: guestHosts.map(g => ({...g, customSamples: []}))
-            };
-        });
-        localStorage.setItem('podcastEpisodes', JSON.stringify(storableEpisodes));
-    } catch (error) {
-        console.error("Failed to save episodes to localStorage", error);
-    }
-  }, [episodes]);
-
+    loadAllEpisodes();
+  }, [loadAllEpisodes]);
+  
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -1222,7 +1246,7 @@ export default function App() {
           voiceConfig: await getVoiceConfig(guest.customSamples, guest.voice),
       })));
 
-      const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, guestHostsPayload, 'South African');
+      const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, guestHostsPayload, 'South African', backgroundSound, backgroundVolume);
       setAudioData(audioData); setScriptTimings(timings); setCurrentStep(4);
     } catch (e: any) {
       setError(`Failed to generate audio: ${e.message}`);
@@ -1230,7 +1254,7 @@ export default function App() {
     } finally {
       setIsLoadingAudio(false);
     }
-  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, guestHosts, samanthaName, stewardName]);
+  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, guestHosts, samanthaName, stewardName, backgroundSound, backgroundVolume]);
 
   const handleDownloadAudio = () => {
     if (!audioData) return;
@@ -1426,23 +1450,42 @@ export default function App() {
     }
   };
 
-  const handleSaveOrUpdateEpisode = () => {
+  const handleSaveOrUpdateEpisode = useCallback(async () => {
     if (!episodeTitle.trim() || episodeNumber <= 0) { setError("Episode Title and Number are required to save."); return; }
-    const episodeData: Omit<Episode, 'id' | 'title' | 'episodeNumber'> = {
-        samanthaName, stewardName, samanthaVoice, samanthaCustomSamples, stewardVoice, stewardCustomSamples,
-        guestHosts, prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength,
-        script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound: 'none', audioData,
+    
+    // Create a version of the episode data that is safe for storage (no large data).
+    const getStorableEpisodeData = (fullAudioData: string | null): Episode => ({
+        id: loadedEpisodeId || `ep_${Date.now()}`, title: episodeTitle, episodeNumber,
+        samanthaName, stewardName, samanthaVoice, stewardVoice,
+        samanthaCustomSamples: samanthaCustomSamples.map(s => ({...s, base64: ''})), // Clear large data
+        stewardCustomSamples: stewardCustomSamples.map(s => ({...s, base64: ''})),
+        guestHosts: guestHosts.map(g => ({...g, customSamples: g.customSamples.map(s => ({...s, base64: ''}))})),
+        prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength,
+        script, scriptTimings, brandedName, contactDetails, website, slogan, 
+        backgroundSound, backgroundVolume, audioData: fullAudioData, // Include audio only if needed
         adText, adScript
-    };
-    if (loadedEpisodeId) {
-        setEpisodes(prev => prev.map(ep => ep.id === loadedEpisodeId ? { ...ep, ...episodeData, title: episodeTitle, episodeNumber } : ep));
-    } else {
-        const newId = `ep_${Date.now()}`;
-        setEpisodes(prev => [...prev, { ...episodeData, id: newId, title: episodeTitle, episodeNumber }]);
-        setLoadedEpisodeId(newId);
+    });
+
+    try {
+        if (directoryHandle) {
+            const episodeForFile: Episode = getStorableEpisodeData(audioData); // Save with full audio data
+            const fileName = `${episodeForFile.id}.json`;
+            await writeFile(fileName, episodeForFile);
+        } else {
+            const episodeForStorage: Episode = getStorableEpisodeData(null); // Save with NO audio data
+            const existingEpisodes = episodes.filter(ep => ep.id !== episodeForStorage.id);
+            const updatedEpisodes = [...existingEpisodes, episodeForStorage];
+            localStorage.setItem('podcastEpisodes', JSON.stringify(updatedEpisodes));
+        }
+
+        await loadAllEpisodes();
+        if (!loadedEpisodeId) setLoadedEpisodeId(`ep_${Date.now()}`);
+        setError('');
+    } catch (e: any) {
+        setError(`Failed to save episode: ${e.message}`);
     }
-    setError('');
-  };
+  }, [episodeTitle, episodeNumber, loadedEpisodeId, samanthaName, stewardName, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, guestHosts, prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength, script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound, backgroundVolume, audioData, adText, adScript, directoryHandle, writeFile, episodes, loadAllEpisodes]);
+  
   
   const handleLoadEpisode = (id: string) => {
     if (!id) return;
@@ -1469,6 +1512,7 @@ export default function App() {
     setScript(ep.script); setScriptTimings(ep.scriptTimings); setBrandedName(ep.brandedName);
     setContactDetails(ep.contactDetails); setWebsite(ep.website); setSlogan(ep.slogan);
     setAudioData(ep.audioData); setEpisodeTitle(ep.title); setEpisodeNumber(ep.episodeNumber);
+    setBackgroundSound(ep.backgroundSound || 'none'); setBackgroundVolume(ep.backgroundVolume ?? 0.1);
     setLoadedEpisodeId(ep.id);
     setAdText(ep.adText || null); setAdScript(ep.adScript || null);
     if (ep.audioData) setCurrentStep(4);
@@ -1524,7 +1568,7 @@ export default function App() {
     switch(currentStep) {
       case 1: return <StepHosts error={error} setError={setError} samanthaName={samanthaName} setSamanthaName={setSamanthaName} stewardName={stewardName} setStewardName={setStewardName} samanthaVoice={samanthaVoice} setSamanthaVoice={setSamanthaVoice} stewardVoice={stewardVoice} setStewardVoice={setStewardVoice} isPreviewingSamantha={isPreviewingSamantha} isPreviewingSteward={isPreviewingSteward} handlePreviewVoice={handlePreviewVoice} femaleVoices={femaleVoices} maleVoices={maleVoices} areHostsValid={areHostsValid} setCurrentStep={setCurrentStep} samanthaCustomSamples={samanthaCustomSamples} isPreviewingSamanthaCustom={isPreviewingSamanthaCustom} isRecordingSamantha={isRecordingSamantha} samanthaAudioFileInputRef={samanthaAudioFileInputRef} stewardCustomSamples={stewardCustomSamples} isPreviewingStewardCustom={isPreviewingStewardCustom} isRecordingSteward={isRecordingSteward} stewardAudioFileInputRef={stewardAudioFileInputRef} handlePreviewCustomVoice={handlePreviewCustomVoice} handleRemoveCustomAudio={handleRemoveCustomAudio} handleToggleRecording={handleToggleRecording} handleAudioFileChange={handleAudioFileChange} isPreviewingQuality={isPreviewingQuality} handlePreviewQuality={handlePreviewQuality} guestHosts={guestHosts} handleAddGuest={handleAddGuest} handleRemoveGuest={handleRemoveGuest} handleUpdateGuest={handleUpdateGuest} guestStates={guestStates} guestAudioFileInputRefs={guestAudioFileInputRefs} />;
       case 2: return <StepContent error={error} episodeTitle={episodeTitle} setEpisodeTitle={setEpisodeTitle} episodeNumber={episodeNumber} setEpisodeNumber={setEpisodeNumber} episodeLength={episodeLength} setEpisodeLength={setEpisodeLength} language={language} setLanguage={setLanguage} prompt={prompt} setPrompt={setPrompt} fileName={fileName} fileInputRef={fileInputRef} handleFileChange={handleFileChange} samanthaName={samanthaName} stewardName={stewardName} manualScriptText={manualScriptText} setManualScriptText={setManualScriptText} customRules={customRules} setCustomRules={setCustomRules} setCurrentStep={setCurrentStep} handleGenerateScript={handleGenerateScript} isLoadingScript={isLoadingScript} areContentInputsValid={() => !!(prompt || pdfText || manualScriptText)} />;
-      case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} />;
+      case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} backgroundSound={backgroundSound} setBackgroundSound={setBackgroundSound} backgroundVolume={backgroundVolume} setBackgroundVolume={setBackgroundVolume} />;
       case 4: return script && audioData && scriptTimings ? <StepStudio audioData={audioData} setAudioData={setAudioData} script={script} scriptTimings={scriptTimings} handleDownloadAudio={handleDownloadAudio} handleStartOver={handleStartOver} handleSaveOrUpdateEpisode={handleSaveOrUpdateEpisode} loadedEpisodeId={loadedEpisodeId} areTimingsStale={areTimingsStale} setAreTimingsStale={setAreTimingsStale} adText={adText} setAdText={setAdText} adScript={adScript} setAdScript={setAdScript} episodeTitle={episodeTitle} brandedName={brandedName}/> : <div>Loading...</div>;
       default: return <div />;
     }
@@ -1546,6 +1590,7 @@ export default function App() {
                 <nav className="flex items-center gap-4">
                     <TabButton name="Creator" icon={<VideoIcon />} isActive={activeTab === 'creator'} onClick={() => setActiveTab('creator')} />
                     <TabButton name="Editor" icon={<CutIcon />} isActive={activeTab === 'editor'} onClick={() => setActiveTab('editor')} />
+                    <TabButton name="Settings" icon={<SettingsIcon />} isActive={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
                     <TabButton name="About" icon={<InfoIcon />} isActive={activeTab === 'about'} onClick={() => setActiveTab('about')} />
                 </nav>
             </div>
@@ -1575,6 +1620,7 @@ export default function App() {
         )}
         
         {activeTab === 'editor' && <AudioEditorTab />}
+        {activeTab === 'settings' && <SettingsTab apiKeys={userApiKeys} setApiKeys={setUserApiKeys} directoryHandle={directoryHandle} connectFolder={connectFolder} disconnectFolder={disconnectFolder} isFileSystemSupported={isSupported} />}
         {activeTab === 'about' && <AboutTab />}
 
       </div>
@@ -2076,4 +2122,93 @@ const AboutTab = () => {
             </Card>
         </div>
     )
+};
+
+const SettingsTab: React.FC<{
+    apiKeys: ApiKey[];
+    setApiKeys: (keys: ApiKey[]) => void;
+    directoryHandle: any | null;
+    connectFolder: () => void;
+    disconnectFolder: () => void;
+    isFileSystemSupported: boolean;
+}> = ({ apiKeys, setApiKeys, directoryHandle, connectFolder, disconnectFolder, isFileSystemSupported }) => {
+    const [newApiKey, setNewApiKey] = useState('');
+
+    const handleAddKey = () => {
+        if (newApiKey.trim() && !apiKeys.some(k => k.key === newApiKey.trim())) {
+            const updatedKeys = [...apiKeys, { key: newApiKey.trim(), id: `key_${Date.now()}` }];
+            setApiKeys(updatedKeys);
+            apiKeyService.saveApiKeys(updatedKeys);
+            setNewApiKey('');
+        }
+    };
+
+    const handleRemoveKey = (id: string) => {
+        const updatedKeys = apiKeys.filter(k => k.id !== id);
+        setApiKeys(updatedKeys);
+        apiKeyService.saveApiKeys(updatedKeys);
+    };
+
+    return (
+        <div className="max-w-4xl mx-auto py-12 px-4 sm:px-0 fade-in space-y-12">
+            <Card title="API Key Management" icon={<SettingsIcon />}>
+                <p className="text-text-secondary">
+                    Provide your own Gemini API keys. The app will prioritize your keys and automatically rotate through them if one hits a quota limit. Your keys are saved securely in your browser's local storage and are never sent to our servers.
+                </p>
+                <div className="flex gap-4">
+                    <input
+                        type="password"
+                        value={newApiKey}
+                        onChange={(e) => setNewApiKey(e.target.value)}
+                        placeholder="Enter new Gemini API Key"
+                        className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition"
+                    />
+                    <button onClick={handleAddKey} className="bg-primary text-on-primary font-bold py-4 px-8 rounded-lg hover:bg-primary-hover transition flex-shrink-0 shadow-primary-glow">
+                        Add Key
+                    </button>
+                </div>
+                <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-text-primary">Your API Keys</h3>
+                    {apiKeys.length === 0 ? (
+                         <p className="text-text-secondary italic">No user-provided keys found. The app is using the default keys.</p>
+                    ) : (
+                        <div className="space-y-2">
+                            {apiKeys.map(apiKey => (
+                                <div key={apiKey.id} className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg">
+                                    <span className="font-mono text-sm text-text-secondary">••••••••{apiKey.key.slice(-4)}</span>
+                                    <button onClick={() => handleRemoveKey(apiKey.id)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition"><TrashIcon /></button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </Card>
+
+            <Card title="Local Project Folder" icon={<UploadIcon />}>
+                {isFileSystemSupported ? (
+                    <>
+                        <p className="text-text-secondary">
+                            Connect a local folder on your computer to save and load your episodes. This gives you direct control over your project files (.json) and helps avoid browser storage limitations.
+                        </p>
+                        {directoryHandle ? (
+                            <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg space-y-4">
+                               <p className="font-semibold text-green-300">Connected to: <span className="font-mono bg-zinc-800 px-2 py-1 rounded">{directoryHandle.name}</span></p>
+                                <button onClick={disconnectFolder} className="w-full bg-zinc-700 text-on-primary font-bold py-3 px-6 rounded-lg hover:bg-zinc-600 transition">
+                                    Disconnect Folder
+                                </button>
+                            </div>
+                        ) : (
+                             <button onClick={connectFolder} className="w-full bg-gold text-background font-bold py-4 px-10 rounded-lg hover:opacity-90 transition flex justify-center items-center gap-2 text-lg shadow-lg shadow-gold/20">
+                                Connect Folder
+                            </button>
+                        )}
+                    </>
+                ) : (
+                     <p className="text-yellow-400">
+                         Your browser does not support the File System Access API. This feature is unavailable. Please try a modern browser like Chrome or Edge.
+                     </p>
+                )}
+            </Card>
+        </div>
+    );
 };

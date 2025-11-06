@@ -61,6 +61,7 @@ export interface Episode {
   website: string;
   slogan: string;
   backgroundSound: string;
+  backgroundVolume: number;
   // Step 4 state
   audioData: string | null;
   adText?: string | null;
@@ -72,4 +73,5 @@ export type EffectType = 'volume' | 'noise' | 'speed';
 // FIX: Added missing ApiKey interface to resolve import error in apiKeyService.ts
 export interface ApiKey {
   key: string;
+  id: string;
 }

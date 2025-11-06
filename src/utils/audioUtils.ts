@@ -414,6 +414,8 @@ export function mixAudio(voicePcm: Uint8Array, backgroundPcm: Uint8Array, backgr
     const voiceInt16 = new Int16Array(voicePcm.buffer, voicePcm.byteOffset, voicePcm.length / 2);
     const backgroundInt16 = new Int16Array(backgroundPcm.buffer, backgroundPcm.byteOffset, backgroundPcm.length / 2);
     
+    if (backgroundInt16.length === 0) return voicePcm;
+
     const mixedPcm = new Int16Array(voiceInt16.length);
     const backgroundLength = backgroundInt16.length;
     

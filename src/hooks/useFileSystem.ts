@@ -82,7 +82,8 @@ export function useFileSystem() {
                         const file = await (entry as any).getFile();
                         const content = await file.text();
                         const episodeData = JSON.parse(content);
-                        episodes.push({ ...episodeData, id: entry.name });
+                        // The file name itself is the ID
+                        episodes.push({ ...episodeData, id: entry.name.replace('.json', '') });
                     } catch (e) {
                         console.error(`Could not read or parse file ${entry.name}`, e);
                     }

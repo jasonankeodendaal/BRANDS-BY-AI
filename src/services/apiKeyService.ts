@@ -11,7 +11,7 @@ export function getApiKeys(): ApiKey[] {
         const storedKeys = localStorage.getItem(API_KEY_STORAGE_KEY);
         if (storedKeys) {
             const parsed = JSON.parse(storedKeys);
-            if (Array.isArray(parsed) && parsed.every(item => typeof item === 'object' && 'key' in item)) {
+            if (Array.isArray(parsed) && parsed.every(item => typeof item === 'object' && 'key' in item && 'id' in item)) {
                 return parsed;
             }
         }
