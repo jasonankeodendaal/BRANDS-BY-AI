@@ -3,7 +3,7 @@ import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, Gues
 import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice, generateQualityPreviewAudio, generateAdText, generateAdScript } from './services/geminiService';
 import { extractTextFromPdf } from './services/pdfService';
 import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence, applyGain, applyNoiseGate, normalize } from './utils/audioUtils';
-import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, DotsIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon, SettingsIcon, NormalizeIcon, NoiseGateIcon, GainIcon } from './components/Icons';
+import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, DotsIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon, SettingsIcon, NormalizeIcon, NoiseGateIcon, GainIcon, HuggingFaceIcon, GoogleIcon } from './components/Icons';
 import { useFileSystem } from './hooks/useFileSystem';
 import * as apiKeyService from './services/apiKeyService';
 import { BACKGROUND_AUDIO } from './assets/backgroundAudio';
@@ -2123,13 +2123,21 @@ const SettingsTab: React.FC<{
     isFileSystemSupported: boolean;
 }> = ({ apiKeys, setApiKeys, directoryHandle, connectFolder, disconnectFolder, isFileSystemSupported }) => {
     const [newApiKey, setNewApiKey] = useState('');
+    const [newApiKeyName, setNewApiKeyName] = useState('');
+    const [newApiKeyType, setNewApiKeyType] = useState<'gemini' | 'huggingface'>('gemini');
 
     const handleAddKey = () => {
-        if (newApiKey.trim() && !apiKeys.some(k => k.key === newApiKey.trim())) {
-            const updatedKeys = [...apiKeys, { key: newApiKey.trim(), id: `key_${Date.now()}` }];
+        if (newApiKey.trim() && newApiKeyName.trim() && !apiKeys.some(k => k.key === newApiKey.trim())) {
+            const updatedKeys = [...apiKeys, {
+                key: newApiKey.trim(),
+                id: `key_${Date.now()}`,
+                name: newApiKeyName.trim(),
+                type: newApiKeyType
+            }];
             setApiKeys(updatedKeys);
             apiKeyService.saveApiKeys(updatedKeys);
             setNewApiKey('');
+            setNewApiKeyName('');
         }
     };
 
@@ -2143,29 +2151,60 @@ const SettingsTab: React.FC<{
         <div className="max-w-4xl mx-auto py-12 px-4 sm:px-0 fade-in space-y-12">
             <Card title="API Key Management" icon={<SettingsIcon />}>
                 <p className="text-text-secondary">
-                    Provide your own Gemini API keys. The app will prioritize your keys and automatically rotate through them if one hits a quota limit. Your keys are saved securely in your browser's local storage and are never sent to our servers.
+                    Provide your own Gemini or Hugging Face API keys/tokens. The app will use the appropriate credentials for generation. Your keys are saved securely in your browser's local storage.
                 </p>
-                <div className="flex gap-4">
-                    <input
-                        type="password"
-                        value={newApiKey}
-                        onChange={(e) => setNewApiKey(e.target.value)}
-                        placeholder="Enter new Gemini API Key"
-                        className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition"
-                    />
-                    <button onClick={handleAddKey} className="bg-primary text-on-primary font-bold py-4 px-8 rounded-lg hover:bg-primary-hover transition flex-shrink-0 shadow-primary-glow">
-                        Add Key
-                    </button>
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-text-secondary mb-2">Key Name</label>
+                            <input
+                                type="text"
+                                value={newApiKeyName}
+                                onChange={(e) => setNewApiKeyName(e.target.value)}
+                                placeholder="e.g., Personal Key"
+                                className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-text-secondary mb-2">Key Type</label>
+                            <select
+                                value={newApiKeyType}
+                                onChange={(e) => setNewApiKeyType(e.target.value as any)}
+                                className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none"
+                            >
+                                <option value="gemini">Google Gemini</option>
+                                <option value="huggingface">Hugging Face</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div className="flex gap-4">
+                        <input
+                            type="password"
+                            value={newApiKey}
+                            onChange={(e) => setNewApiKey(e.target.value)}
+                            placeholder="Enter new API Key or Token"
+                            className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition"
+                        />
+                        <button onClick={handleAddKey} className="bg-primary text-on-primary font-bold py-4 px-8 rounded-lg hover:bg-primary-hover transition flex-shrink-0 shadow-primary-glow">
+                            Add Key
+                        </button>
+                    </div>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-3 pt-4 border-t border-zinc-800">
                     <h3 className="text-lg font-semibold text-text-primary">Your API Keys</h3>
                     {apiKeys.length === 0 ? (
-                         <p className="text-text-secondary italic">No user-provided keys found. The app is using the default keys.</p>
+                        <p className="text-text-secondary italic">No user-provided keys found. The app is using the default keys.</p>
                     ) : (
                         <div className="space-y-2">
                             {apiKeys.map(apiKey => (
-                                <div key={apiKey.id} className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg">
-                                    <span className="font-mono text-sm text-text-secondary">••••••••{apiKey.key.slice(-4)}</span>
+                                <div key={apiKey.id} className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border-l-4" style={{ borderColor: apiKey.type === 'gemini' ? '#4285F4' : '#FFD21E' }}>
+                                    <div className="flex items-center gap-3">
+                                        {apiKey.type === 'gemini' ? <GoogleIcon /> : <HuggingFaceIcon />}
+                                        <div className="flex flex-col">
+                                            <span className="font-semibold text-text-primary">{apiKey.name}</span>
+                                            <span className="font-mono text-xs text-text-secondary">••••••••{apiKey.key.slice(-4)}</span>
+                                        </div>
+                                    </div>
                                     <button onClick={() => handleRemoveKey(apiKey.id)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition"><TrashIcon /></button>
                                 </div>
                             ))}

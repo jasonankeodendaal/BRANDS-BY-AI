@@ -6,7 +6,11 @@ import { BACKGROUND_AUDIO } from '../assets/backgroundAudio';
 
 // --- API Key Rotation System ---
 const getCombinedApiKeys = (): string[] => {
-    const userKeys = getApiKeys().map(k => k.key);
+    // 1. Get user keys from storage and filter for Gemini keys only
+    const userGeminiKeys = getApiKeys()
+        .filter(k => k.type === 'gemini')
+        .map(k => k.key);
+    
     const envKeys = [
         process.env.API_KEY,
         process.env.API_KEY_1,
@@ -15,7 +19,7 @@ const getCombinedApiKeys = (): string[] => {
     ].filter(Boolean) as string[];
 
     // User keys are prioritized. A Set prevents duplicates.
-    return [...new Set([...userKeys, ...envKeys])];
+    return [...new Set([...userGeminiKeys, ...envKeys])];
 }
 
 /**

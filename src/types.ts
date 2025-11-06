@@ -72,4 +72,6 @@ export type EffectType = 'volume' | 'noise' | 'speed';
 export interface ApiKey {
   key: string;
   id: string;
+  name: string;
+  type: 'gemini' | 'huggingface';
 }
