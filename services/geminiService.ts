@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
 import { ScriptLine, VoiceConfig, ScriptTiming } from '../types';
 import { decode, encode, concatenatePcm, getPcmChunkDuration } from '../utils/audioUtils';
 
@@ -13,6 +13,49 @@ const apiKeys = [
     process.env.API_KEY_3,
   ]),
 ].filter(Boolean) as string[];
+
+
+/**
+ * Translates cryptic API errors into user-friendly, actionable messages.
+ * @param error The error object caught from an API call.
+ * @returns A string containing a clear, understandable error message.
+ */
+function getFriendlyErrorMessage(error: any): string {
+  const defaultMessage = "An unexpected error occurred. Please check the console for details.";
+  
+  if (!error) return defaultMessage;
+
+  let message = error.message || String(error);
+
+  // The Gemini SDK often includes details in a `toString()` method that aren't in `message`.
+  const errorString = error.toString();
+  if (errorString.includes('[GoogleGenerativeAI Error]')) {
+    // Extract the message part after the prefix
+    message = errorString.replace('[GoogleGenerativeAI Error]:', '').trim();
+  }
+  
+  // User-friendly mappings for common technical errors
+  if (message.toLowerCase().includes("api key not valid")) {
+    return "Authentication failed: The API key is not valid. Please ensure your key is correct and has the necessary permissions.";
+  }
+  if (message.toLowerCase().includes("permission denied")) {
+      return "Permission Denied: The API key is missing necessary permissions for the requested operation. Please check your Google Cloud project settings.";
+  }
+  if (message.toLowerCase().includes("model `gemini-2.5-pro` not found")) {
+      return "Model Not Found: The 'gemini-2.5-pro' model is unavailable. This may be a temporary issue or a problem with your API key's permissions.";
+  }
+  if (message.toLowerCase().includes("resource has been exhausted")) {
+      return "Quota Exceeded: You have exceeded your usage limit for the API. Please check your billing account or try again later.";
+  }
+  if (message.toLowerCase().includes("invalid argument")) {
+      return "Invalid Request: The request sent to the AI was invalid. This could be due to an unsupported voice, a problem with the script content, or malformed custom samples. Please try adjusting your inputs.";
+  }
+   if (message.toLowerCase().includes("deadline exceeded")) {
+      return "The request timed out. This can happen with very long scripts or during periods of high demand. Please try again or consider shortening the script.";
+  }
+
+  return message;
+}
 
 
 /**
@@ -40,19 +83,18 @@ async function withApiKeyRotation<T>(apiCall: (ai: GoogleGenAI) => Promise<T>): 
       lastError = e;
       const errorMessage = (e?.message || e.toString()).toLowerCase();
       
-      // Check for specific quota-related error messages
       if (errorMessage.includes('quota') || errorMessage.includes('rate limit') || errorMessage.includes('resource has been exhausted')) {
         console.warn(`API key failed due to quota issue. Switching to the next key.`);
-        continue; // Try the next key
+        continue;
       } else {
-        // Not a quota error, fail fast
-        throw e;
+        // Not a quota error, fail fast with a user-friendly message
+        throw new Error(getFriendlyErrorMessage(e));
       }
     }
   }
 
   // If the loop completes, all keys have failed due to quota issues
-  throw new Error(`All API keys have reached their usage limits. Please try again later. Last error: ${lastError?.message}`);
+  throw new Error(`All API keys have reached their usage limits. Please try again later. Last error: ${getFriendlyErrorMessage(lastError)}`);
 }
 
 
@@ -103,41 +145,31 @@ export async function generateScript(
     ` : '';
 
   const dynamicPerformanceInstructions = `
-    **PERFORMANCE GOAL: A TOTALLY UNSCRIPTED, HYPER-REALISTIC, AND INTELLECTUALLY ENGAGING CONVERSATION.** Your ultimate mission is to generate a script that feels like eavesdropping on a genuine, spontaneous, and lively conversation between intelligent, charismatic experts. It must NEVER sound like a pre-written script.
+    **HYPER-REALISM DIRECTIVE:** Your ultimate mission is to generate a script that feels completely unscripted. It must sound like eavesdropping on a genuine, spontaneous, and lively conversation between two intelligent, charismatic people. THE ULTIMATE FAILURE IS A SCRIPT THAT SOUNDS LIKE IT'S BEING READ.
 
-    - **NO ADVERTISING TONE:** This is the most important rule. Avoid any language that sounds promotional, corporate, or like a sales pitch. The conversation must feel authentic and organic. If branding information is provided, it must be woven in so subtly that it's almost unnoticeable. If it can't be done naturally, DO NOT INCLUDE IT.
-    
-    - **DEEP CHARACTER & CHEMISTRY:** Give each host a distinct, consistent personality. For example, one could be the curious, enthusiastic optimist, while the other is the witty, grounded skeptic. Their dialogue, reactions, and even their sense of humor MUST reflect these underlying personalities throughout the entire script. They should have a clear chemistry—they can build on each other's ideas, challenge each other respectfully, and share moments of genuine humor. DO NOT state the personalities in the script; let them emerge through their words.
+    **1. DIALOGUE MECHANICS (THE SECRET SAUCE):**
+    - **EMBRACE IMPERFECTION:** Real people don't speak in perfect, polished prose. This is the most important rule. Use sentence fragments, self-corrections (e.g., "And the thing is... actually, no, let me rephrase that..."), and natural fillers ("umm," "like," "you know").
+    - **INTERRUPTIONS ARE ESSENTIAL:** This is key to preventing the "double read" issue.
+        - **The Interruption Mechanic:** When one speaker cuts another off, you MUST do two things:
+            1.  The speaker who is being cut off should have their line end abruptly with an ellipsis (...).
+            2.  The speaker who is interrupting MUST have the 'isInterruption' flag set to 'true'.
+        - **This must happen frequently** for the conversation to feel real.
+    - **ANTI-REPETITION DIRECTIVE:** This is a NON-NEGOTIABLE rule. A speaker who is interrupted MUST NOT repeat the thought they were cut off from in their next line. They must react to the interruption or move the conversation forward in a new direction. Repeating the start of an interrupted sentence is strictly forbidden and will ruin the audio output.
+    - **AVOID "ANNOUNCER VOICE":** The hosts are having a conversation, not giving a speech. They should never sound like they are reading a teleprompter.
 
-    - **NARRATIVE & STRUCTURE:** The conversation must have a clear narrative arc:
-        1. **Hook:** An engaging opening that grabs the listener's attention.
-        2. **Exploration:** A deep dive into 2-3 key points of the topic. The hosts should explore these points from different angles, ask thought-provoking questions, and connect them to real-world examples or personal anecdotes.
-        3. **Climax/Insight:** A moment of genuine insight or a key takeaway.
-        4. **Resolution:** A satisfying conclusion that wraps up the discussion and delivers the call-to-action naturally.
-    
-    - **EXPERT-LEVEL, RELATABLE DIALOGUE:** The hosts should sound like intelligent experts on the topic, but they must explain complex ideas in a simple, relatable way for the audience. They should avoid clichés and generic statements, instead offering fresh perspectives and making surprising connections.
-    
-    - **HYPER-REALISTIC DELIVERY:**
-        - **Imperfect Grammar for Authenticity:** People don't speak in perfect, complete sentences. Fully embrace this. Use contractions (e.g., "don't", "it's") everywhere. Incorporate filler words like "umm," "uh," "like," "you know," when natural. Allow speakers to self-correct (e.g., "It was... no, wait, it was actually the other day...").
-        - **Active Listening & Real Reactions:** Hosts must actively listen and react. This means:
-            - Frequent, natural interruptions and talking over each other slightly.
-            - Using interjections like "Oh, that's a great point," "I never thought of it that way," or "Hang on, what about...".
-    
-    - **ESSENTIAL VOCAL PERFORMANCE CUES:** The 'cue' field is your primary tool for directing the vocal performance and conveying emotional intelligence. It is MANDATORY and must be used creatively and frequently.
-        - **Dynamic & Nuanced Cues:** Go beyond simple cues like 'laughing'. Use a wide variety of descriptive cues: 'chuckles', 'uproarious laughter', 'wry smile', 'speaking quickly', 'trailing off', 'emphatic', 'whispering conspiratorially', 'mock outrage', 'thoughtful pause', 'slight hesitation', 'incredulous', 'reflective pause', 'suddenly animated', 'a moment of realization', 'building excitement', 'gently correcting'.
+    **2. VOCAL PERFORMANCE CUES (THE EMOTION):**
+    - The 'cue' field is MANDATORY for conveying emotional intelligence.
+    - **Be Specific & Dynamic:** Go beyond 'laughing'. Use descriptive cues that guide the performance: 'chuckles softly', 'a moment of realization', 'trailing off thoughtfully', 'speaking quickly with excitement', 'a skeptical tone', 'gentle sarcasm', 'genuine surprise'.
   `;
 
   const languageInstructions = language === 'Afrikaans' ? `
     EXPERT-LEVEL AFRIKAANS SCRIPTING: The script MUST be written in fluent, modern, and highly conversational Afrikaans.
     - **Authenticity is key:** Do not simply translate from English. Think and write directly in Afrikaans as a native speaker would.
-    - **Avoid Anglicisms:** Actively avoid direct loanwords or sentence structures from English ("anglisismes"). Use authentic Afrikaans equivalents.
-    - **Use Idiomatic Expressions:** Incorporate common, natural-sounding Afrikaans idioms and sayings ("idiome en gesegdes").
-    - **Conversational Flow:** Use common conversational particles and filler words (e.g., "wel," "nou ja," "jy weet," "darem") to make the speech less robotic.
     - **Cues in English:** While dialogue must be in perfect Afrikaans, the emotional cues ('cue' field) must remain in English.
   ` : '';
     
   const accentInstruction = language === 'English' ? `
-    ACCENT & STYLE: The dialogue must be written in natural, modern South African English. Subtly incorporate common South African phrasing and vocabulary, but avoid turning it into a caricature. The goal is authenticity.
+    ACCENT & STYLE: The dialogue must be written in natural, modern South African English. Subtly incorporate common South African phrasing and vocabulary, but avoid turning it into a caricature.
   ` : '';
     
   const customRulesInstruction = customRules ? `
@@ -157,14 +189,14 @@ export async function generateScript(
   const thirdHostInstruction = thirdHost ? `
     There is a third person, "${thirdHost.name}", joining the conversation.
     - **Role:** ${thirdHost.name}'s role is: "${thirdHost.role}". Their contributions must be focused on this role.
-    - **Integrate Naturally:** Weave ${thirdHost.name} into the conversation organically. They shouldn't just speak in one block.
+    - **Integrate Naturally:** Weave ${thirdHost.name} into the conversation organically.
   ` : '';
 
   const episodeContext = (episodeTitle && episodeNumber) 
     ? `This is Episode ${episodeNumber}, titled "${episodeTitle}". The hosts should reference this information in their introduction.`
     : '';
   
-  const lengthInstruction = `The target length for this podcast is **${episodeLength} minutes**. A typical speaking rate is about 150 words per minute. Therefore, the total script length should be approximately ${episodeLength * 150} words. Adjust the depth and breadth of the conversation to meet this target length naturally.`;
+  const lengthInstruction = `The target length for this podcast is **${episodeLength} minutes**. The total script length should be approximately ${episodeLength * 150} words.`;
 
 
   const fullPrompt = `
@@ -183,24 +215,10 @@ export async function generateScript(
     ${customRulesInstruction}
     ${customScriptInstruction}
 
-    VERY IMPORTANT RULES & STRUCTURE:
-    1.  **MANDATORY INTRODUCTION FORMAT:** This rule is non-negotiable and MUST be followed precisely. The script MUST begin with an introduction where the hosts:
-        a. Welcome listeners to the podcast, explicitly naming it "${branding?.name || 'Brands by Ai'}".
-        b. Announce the current episode's number and title if provided (e.g., "Welcome to Episode ${episodeNumber || 'X'}: ${episodeTitle || 'Y'}").
-        c. Each host and guest MUST introduce themselves by their name.
-        This entire introduction sequence should be woven together naturally and lead into the main topic.
-    2.  **DYNAMIC & BRANDED CONCLUSION:** The podcast MUST end with a natural-sounding call-to-action that directs listeners to links in the bio.
-        - **Core Message:** The essential instruction is to guide listeners to the bio/show notes for links.
-        - **Varied Phrasing:** The exact wording should feel like a natural conclusion to the conversation. Avoid robotic repetition. Examples of acceptable final lines include:
-            - "It was a great discussion. To learn more about everything we mentioned, check in the bio for links on these brands."
-            - "I learned a lot today! And for our listeners, all the resources and brand links are in the bio."
-            - "That's our show for today! Don't forget to check out the links in the bio."
-        - **Finality:** This call-to-action MUST be the final part of the script. No dialogue should follow it.
-    3.  The script MUST be written entirely in ${language}.
-    4.  All hosts should contribute meaningfully to the conversation.
-    5.  The conversation must be entirely in the first person.
-    6.  Ensure the output is a valid JSON array, with each object containing a "speaker" (from the list of provided host names) and their "dialogue" (in ${language}).
-    7.  To make the podcast feel real, you MUST include a 'cue' field for most lines. This should be a short, descriptive phrase of the emotion or tone (e.g., 'laughing', 'crying', 'surprised', 'thoughtful'). Cues MUST be in English.
+    VERY IMPORTANT FINAL RULES:
+    1.  **MANDATORY INTRODUCTION:** The script MUST begin with an introduction where the hosts welcome listeners to "${branding?.name || 'Brands by Ai'}", announce the episode number and title (if provided), and introduce themselves by name.
+    2.  **MANDATORY CONCLUSION:** The podcast MUST end with a natural-sounding call-to-action directing listeners to links in the bio/show notes. This MUST be the final part of the script.
+    3.  The output MUST be a valid JSON array of script line objects.
   `;
     
   const response = await withApiKeyRotation(async (ai) => 
@@ -215,20 +233,24 @@ export async function generateScript(
             type: Type.OBJECT,
             properties: {
                 speaker: {
-                type: Type.STRING,
-                enum: speakerEnum,
-                description: 'The name of the speaker.',
+                  type: Type.STRING,
+                  enum: speakerEnum,
+                  description: 'The name of the speaker.',
                 },
                 dialogue: {
-                type: Type.STRING,
-                description: "The speaker's line of dialogue.",
+                  type: Type.STRING,
+                  description: "The speaker's line of dialogue. If interrupted, it MUST end with '...'",
                 },
                 cue: {
                     type: Type.STRING,
-                    description: "An optional one-word emotional or behavioral cue (e.g., 'laughing', 'surprised')."
+                    description: "A mandatory, short, descriptive emotional or behavioral cue (e.g., 'laughing', 'surprised', 'thoughtful pause'). MUST be in English."
+                },
+                isInterruption: {
+                    type: Type.BOOLEAN,
+                    description: "Set to 'true' ONLY if this line is actively cutting off the previous speaker."
                 }
             },
-            required: ['speaker', 'dialogue'],
+            required: ['speaker', 'dialogue', 'cue'],
             },
         },
         },
@@ -251,27 +273,11 @@ export async function generateScript(
 async function generateSingleSpeakerAudio(
   text: string,
   voiceConfig: VoiceConfig,
-  cue?: string,
-  accent: Accent = 'South African'
+  cue?: string
 ): Promise<string> {
-  const accentInstruction = accent === 'South African' 
-    ? 'The performance must be in a standard, modern South African accent.' 
-    : '';
-
-  const prompt = `
-    You are a master voice actor specializing in hyper-realistic, conversational performances. Your one and only goal is to make this line sound completely unscripted and natural, as if spoken in a real conversation. **Under no circumstances should it sound like you are reading from a script.**
-
-    - **Embrace Imperfection:** Use natural pauses where appropriate, add slight hesitations if it fits the emotion, and dynamically vary your pace and pitch. Avoid a monotone or robotic delivery at all costs.
-    - **Emotional Context:** The specific emotional context for this line is: **"${cue || 'a neutral, conversational tone'}"**. This is your primary guide. Infuse every word with this feeling.
-    - **Accent:** ${accentInstruction}
-
-    Deliver the following line based on these instructions: "${text}"
-  `;
-  
-  const hasCustomVoice = voiceConfig.type === 'custom';
-  const fullPrompt = hasCustomVoice 
-    ? `Your primary task is to create a high-fidelity clone of the provided voice sample, replicating its unique pitch, tone, and cadence as precisely as possible. Then, use that cloned voice to perform the following instructions:\n\n${prompt}`
-    : prompt;
+  // FIX: Simplified the prompt for the TTS model. It understands cues directly in the format `(cue) text`.
+  // This is more reliable and aligns with best practices for the gemini-2.5-flash-preview-tts model.
+  const performableText = cue ? `(${cue}) ${text}` : text;
 
   const speechConfigPayload: {
     voiceConfig?: { prebuiltVoiceConfig: { voiceName: string } };
@@ -287,7 +293,7 @@ async function generateSingleSpeakerAudio(
   const response = await withApiKeyRotation(async (ai) =>
     ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: fullPrompt }] }],
+        contents: [{ parts: [{ text: performableText }] }],
         config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: speechConfigPayload,
@@ -297,7 +303,8 @@ async function generateSingleSpeakerAudio(
 
   const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   if (!base64Audio) {
-    throw new Error("No audio data received from API for single line.");
+    console.error("Audio generation for line failed. Prompt:", performableText, "Response:", JSON.stringify(response, null, 2));
+    throw new Error("No audio data received from API for a line. The model may have rejected the prompt or voice sample.");
   }
   return base64Audio;
 }
@@ -311,46 +318,68 @@ export async function generatePodcastAudio(
     thirdHost?: { name: string; voiceConfig: VoiceConfig; gender: 'male' | 'female' },
     accent: Accent = 'South African'
 ): Promise<{ audioData: string; timings: ScriptTiming[] }> {
-    const audioChunks: Uint8Array[] = [];
+    const rawAudioChunks: Uint8Array[] = [];
     const timings: ScriptTiming[] = [];
     let cumulativeTime = 0;
-
-    for (let i = 0; i < script.length; i++) {
-        const line = script[i];
+    
+    // First pass: generate all audio chunks
+    for (const line of script) {
         let voiceConfig: VoiceConfig | undefined;
-
-        if (line.speaker === samanthaName) {
-            voiceConfig = samanthaVoiceConfig;
-        } else if (line.speaker === stewardName) {
-            voiceConfig = stewardVoiceConfig;
-        } else if (thirdHost && line.speaker === thirdHost.name) {
-            voiceConfig = thirdHost.voiceConfig;
+        if (line.speaker === samanthaName) voiceConfig = samanthaVoiceConfig;
+        else if (line.speaker === stewardName) voiceConfig = stewardVoiceConfig;
+        else if (thirdHost && line.speaker === thirdHost.name) voiceConfig = thirdHost.voiceConfig;
+        
+        if (voiceConfig) {
+            const base64Chunk = await generateSingleSpeakerAudio(line.dialogue, voiceConfig, line.cue);
+            rawAudioChunks.push(decode(base64Chunk));
         } else {
             console.warn(`Unknown speaker in script: ${line.speaker}`);
-            continue; // Skip lines with unknown speakers
-        }
-
-        if (voiceConfig) {
-            const base64Chunk = await generateSingleSpeakerAudio(line.dialogue, voiceConfig, line.cue, accent);
-            const pcmChunk = decode(base64Chunk);
-            const duration = getPcmChunkDuration(pcmChunk, 24000, 16);
-            
-            audioChunks.push(pcmChunk);
-            timings.push({
-                lineIndex: i,
-                startTime: cumulativeTime,
-                duration: duration
-            });
-
-            cumulativeTime += duration;
+            rawAudioChunks.push(new Uint8Array(0)); // Push empty chunk to maintain index alignment
         }
     }
 
-    if (audioChunks.length === 0) {
+    if (rawAudioChunks.length !== script.length) {
+        throw new Error("Mismatch between script lines and generated audio chunks.");
+    }
+    
+    const finalAudioChunks: Uint8Array[] = [];
+
+    // Second pass: process interruptions and calculate timings
+    for (let i = 0; i < script.length; i++) {
+        let pcmChunk = rawAudioChunks[i];
+        if (pcmChunk.length === 0) continue;
+
+        // FIX: If the *next* line is an interruption, truncate *this* line's audio slightly
+        // to create a more natural-sounding overlap effect.
+        if (script[i + 1]?.isInterruption) {
+            const originalDuration = getPcmChunkDuration(pcmChunk, 24000, 16);
+            const cutoffDuration = 0.25; // Cut off the last 250ms
+
+            if (originalDuration > cutoffDuration) {
+                const bytesToKeep = Math.floor((originalDuration - cutoffDuration) * 24000 * 2); // sampleRate * bytesPerSample
+                // Ensure bytesToKeep is an even number for 16-bit samples
+                const finalBytes = bytesToKeep - (bytesToKeep % 2);
+                pcmChunk = pcmChunk.slice(0, finalBytes);
+            }
+        }
+        
+        const duration = getPcmChunkDuration(pcmChunk, 24000, 16);
+        finalAudioChunks.push(pcmChunk);
+        timings.push({
+            lineIndex: i,
+            startTime: cumulativeTime,
+            duration: duration
+        });
+
+        cumulativeTime += duration;
+    }
+
+
+    if (finalAudioChunks.length === 0) {
         throw new Error("Audio generation resulted in no audio data.");
     }
 
-    const concatenatedPcm = concatenatePcm(audioChunks);
+    const concatenatedPcm = concatenatePcm(finalAudioChunks);
     const finalAudioData = encode(concatenatedPcm);
 
     return { audioData: finalAudioData, timings };
@@ -364,38 +393,30 @@ export async function generateQualityPreviewAudio(
     accent: Accent = 'South African'
 ): Promise<string> {
     const previewScript: ScriptLine[] = [
-        { speaker: samanthaName, dialogue: 'Wait, so you\'re telling me...', cue: 'slight hesitation' },
-        { speaker: stewardName, dialogue: 'Yes! Exactly! They replaced the entire orchestra with... rubber chickens.', cue: 'excitedly' },
-        { speaker: samanthaName, dialogue: 'No! Get out of here.', cue: 'incredulous, laughing' },
-        { speaker: stewardName, dialogue: 'I\'m serious! The conductor was just... well, you can imagine. It was beautifully chaotic.', cue: 'chuckling' },
+        { speaker: samanthaName, dialogue: 'Wait, so you\'re telling me...', cue: 'slight hesitation', isInterruption: false },
+        { speaker: stewardName, dialogue: 'Yes! They replaced the entire orchestra with...', cue: 'excitedly, interrupting', isInterruption: true },
+        { speaker: samanthaName, dialogue: 'No! With what?', cue: 'incredulous', isInterruption: true },
+        { speaker: stewardName, dialogue: 'Rubber chickens! It was beautifully chaotic.', cue: 'chuckling', isInterruption: false },
     ];
     
     const samanthaVoiceConfig: VoiceConfig = { type: 'prebuilt', name: samanthaVoice };
     const stewardVoiceConfig: VoiceConfig = { type: 'prebuilt', name: stewardVoice };
 
-    // This will now return an object, but for a simple preview, we only need the audio data.
     const { audioData } = await generatePodcastAudio(
-        previewScript,
-        samanthaName,
-        stewardName,
-        samanthaVoiceConfig,
-        stewardVoiceConfig,
-        undefined,
-        accent
+        previewScript, samanthaName, stewardName,
+        samanthaVoiceConfig, stewardVoiceConfig,
+        undefined, accent
     );
     return audioData;
 }
 
 export async function previewVoice(voiceName: string, language: 'English' | 'Afrikaans' = 'English', accent: Accent = 'South African'): Promise<string> {
-    const accentInstruction = language === 'English'
-            ? 'Perform this with a standard, modern South African accent.'
-            : '';
-
     const previewText = language === 'Afrikaans'
         ? 'Hallo, jy luister na n voorskou van hierdie stem.'
         : 'Hello, you are listening to a preview of this voice.';
     
-    const prompt = `You are a voice actor demonstrating your voice. ${accentInstruction} Read the following line with a warm, natural, and conversational tone: "${previewText}"`;
+    // FIX: Simplified the prompt for the TTS model for better consistency.
+    const prompt = `(warm, natural) ${previewText}`;
     
     const response = await withApiKeyRotation(async (ai) => 
         ai.models.generateContent({
@@ -424,15 +445,13 @@ export async function previewClonedVoice(
   language: 'English' | 'Afrikaans' = 'English',
   accent: Accent = 'South African'
 ): Promise<string> {
-  const accentInstruction = language === 'English'
-          ? 'You must perform this with a standard, modern South African accent.'
-          : '';
 
   const previewText = language === 'Afrikaans'
     ? 'Hierdie is n voorskou van die gekloonde stem.'
     : 'This is a preview of the cloned voice.';
     
-  const prompt = `Your primary task is to create a high-fidelity clone of the provided voice sample. Then, using that cloned voice, please say the following sentence with a warm, natural, and conversational tone. ${accentInstruction} Sentence: "${previewText}"`;
+  // FIX: Simplified the prompt for the TTS model for better consistency.
+  const prompt = `(warm, natural) ${previewText}`;
 
   const response = await withApiKeyRotation(async (ai) => 
     ai.models.generateContent({
@@ -452,4 +471,57 @@ export async function previewClonedVoice(
     throw new Error("No audio data received from API for cloned voice preview.");
   }
   return base64Audio;
+}
+
+export async function generateAdText(script: ScriptLine[], episodeTitle: string, brandedName: string): Promise<string> {
+  const scriptSummary = script.map(line => line.dialogue).join(' ').substring(0, 2000);
+  const prompt = `
+      You are a social media marketing expert for podcasts.
+      Your task is to create a short, exciting, and engaging promotional post for a new podcast episode.
+
+      **Podcast Name:** "${brandedName}"
+      **Episode Title:** "${episodeTitle}"
+      **Content Summary:** ${scriptSummary}...
+
+      **Instructions:**
+      1.  Write in a conversational and enthusiastic tone.
+      2.  Briefly hint at the most interesting topics discussed in the summary.
+      3.  End with a strong call-to-action, telling people to listen now (e.g., "Listen now on all platforms!", "Link in bio!").
+      4.  Include 3-5 relevant and popular hashtags.
+      5.  Keep the entire post concise and perfect for platforms like Instagram, X (Twitter), or Facebook.
+  `;
+  const response: GenerateContentResponse = await withApiKeyRotation(ai => 
+      ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt
+      })
+  );
+  return response.text;
+}
+
+export async function generateAdScript(script: ScriptLine[], episodeTitle: string, brandedName: string): Promise<string> {
+    const scriptSummary = script.map(line => line.dialogue).join(' ').substring(0, 2000);
+    const prompt = `
+        You are an expert advertising copywriter specializing in audio ads.
+        Your task is to write a punchy, compelling 30-second audio ad script for a new podcast episode.
+
+        **Podcast Name:** "${brandedName}"
+        **Episode Title:** "${episodeTitle}"
+        **Content Summary:** ${scriptSummary}...
+
+        **Instructions:**
+        1.  Start with a strong hook to grab the listener's attention immediately.
+        2.  Pose an interesting question or present a fascinating fact from the episode.
+        3.  Clearly state the podcast name and episode title.
+        4.  End with a clear and simple call-to-action (e.g., "Search for ${brandedName} wherever you get your podcasts.").
+        5.  The script should feel energetic and exciting. Use short sentences.
+        6.  Include sound effect cues in brackets, like [upbeat music fades in] or [sound of a cash register].
+    `;
+    const response: GenerateContentResponse = await withApiKeyRotation(ai => 
+        ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        })
+    );
+    return response.text;
 }

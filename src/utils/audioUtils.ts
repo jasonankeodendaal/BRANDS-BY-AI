@@ -36,7 +36,8 @@ export async function decodeAudioData(
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
+  // FIX: Use robust Int16Array constructor with byteOffset and length to prevent RangeError.
+  const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.length / 2);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
@@ -294,4 +295,110 @@ export async function audioBlobToPcmBase64(audioBlob: Blob): Promise<string> {
             await tempAudioContext.close();
         }
     }
+}
+
+/**
+ * Applies a linear fade to PCM audio data.
+ * @param pcmData Raw PCM data as a Uint8Array.
+ * @param type 'in' for fade-in, 'out' for fade-out.
+ * @returns A new Uint8Array with the fade applied.
+ */
+export function applyFade(pcmData: Uint8Array, type: 'in' | 'out'): Uint8Array {
+    // Create a new Int16Array view on the same buffer, respecting byte offset and length.
+    const pcmInt16 = new Int16Array(pcmData.buffer, pcmData.byteOffset, pcmData.length / 2);
+    const fadedPcm = new Int16Array(pcmInt16); // Create a copy to modify
+    const numSamples = fadedPcm.length;
+
+    for (let i = 0; i < numSamples; i++) {
+        let gain;
+        if (type === 'in') {
+            gain = i / (numSamples > 1 ? numSamples - 1 : 1);
+        } else { // 'out'
+            gain = 1 - (i / (numSamples > 1 ? numSamples - 1 : 1));
+        }
+        fadedPcm[i] = Math.round(fadedPcm[i] * gain);
+    }
+    return new Uint8Array(fadedPcm.buffer);
+}
+
+/**
+ * Generates a block of silence as raw PCM data.
+ * @param duration Duration of silence in seconds.
+ * @param sampleRate The sample rate (e.g., 24000).
+ * @param bitsPerSample The bits per sample (e.g., 16).
+ * @returns A Uint8Array containing silent audio data.
+ */
+export function generateSilence(duration: number, sampleRate: number, bitsPerSample: number): Uint8Array {
+    const bytesPerSample = bitsPerSample / 8;
+    const numSamples = Math.floor(duration * sampleRate);
+    const totalBytes = numSamples * bytesPerSample;
+    return new Uint8Array(totalBytes); // Initializes with zeros
+}
+
+/**
+ * Applies a gain (volume) to PCM audio data, with clipping protection.
+ * @param pcmData Raw PCM data as a Uint8Array.
+ * @param gainFactor A multiplier for the volume (e.g., 1.5 for +50%).
+ * @returns A new Uint8Array with the gain applied.
+ */
+export function applyGain(pcmData: Uint8Array, gainFactor: number): Uint8Array {
+    const pcmInt16 = new Int16Array(pcmData.buffer, pcmData.byteOffset, pcmData.length / 2);
+    const modifiedPcm = new Int16Array(pcmInt16.length);
+    const MAX_VAL = 32767;
+    const MIN_VAL = -32768;
+
+    for (let i = 0; i < pcmInt16.length; i++) {
+        const boostedSample = pcmInt16[i] * gainFactor;
+        modifiedPcm[i] = Math.max(MIN_VAL, Math.min(MAX_VAL, boostedSample));
+    }
+    return new Uint8Array(modifiedPcm.buffer);
+}
+
+/**
+ * Applies a simple noise gate to PCM data, silencing audio below a threshold.
+ * @param pcmData Raw PCM data as a Uint8Array.
+ * @param threshold The amplitude threshold (0 to 1.0).
+ * @returns A new Uint8Array with the noise gate applied.
+ */
+export function applyNoiseGate(pcmData: Uint8Array, threshold: number): Uint8Array {
+    const pcmInt16 = new Int16Array(pcmData.buffer, pcmData.byteOffset, pcmData.length / 2);
+    const modifiedPcm = new Int16Array(pcmInt16.length);
+    const thresholdInt16 = threshold * 32767;
+
+    for (let i = 0; i < pcmInt16.length; i++) {
+        if (Math.abs(pcmInt16[i]) < thresholdInt16) {
+            modifiedPcm[i] = 0;
+        } else {
+            modifiedPcm[i] = pcmInt16[i];
+        }
+    }
+    return new Uint8Array(modifiedPcm.buffer);
+}
+
+/**
+ * Changes the speed of audio via resampling (note: this also changes the pitch).
+ * @param pcmData Raw PCM data as a Uint8Array.
+ * @param speedFactor Speed multiplier (e.g., 1.2 for 20% faster, 0.8 for 20% slower).
+ * @returns A new Uint8Array with the speed adjusted.
+ */
+export function changeSpeed(pcmData: Uint8Array, speedFactor: number): Uint8Array {
+    const pcmInt16 = new Int16Array(pcmData.buffer, pcmData.byteOffset, pcmData.length / 2);
+    const originalLength = pcmInt16.length;
+    const newLength = Math.floor(originalLength / speedFactor);
+    const modifiedPcm = new Int16Array(newLength);
+
+    for (let i = 0; i < newLength; i++) {
+        const originalIndex = i * speedFactor;
+        const index1 = Math.floor(originalIndex);
+        const index2 = Math.min(index1 + 1, originalLength - 1);
+        const fraction = originalIndex - index1;
+
+        const sample1 = pcmInt16[index1] || 0;
+        const sample2 = pcmInt16[index2] || 0;
+
+        // Linear interpolation
+        modifiedPcm[i] = sample1 + (sample2 - sample1) * fraction;
+    }
+
+    return new Uint8Array(modifiedPcm.buffer);
 }

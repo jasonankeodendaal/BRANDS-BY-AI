@@ -61,3 +61,5 @@ export interface Episode {
   adText?: string | null;
   adScript?: string | null;
 }
+
+export type EffectType = 'volume' | 'noise' | 'speed';
