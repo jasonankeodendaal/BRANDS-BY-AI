@@ -1,21 +1,16 @@
-import React, { useState, useRef, useCallback, PropsWithChildren, useEffect } from 'react';
-import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, GuestHost, ApiKey } from './types';
-import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice, generateQualityPreviewAudio, generateAdText, generateAdScript } from './services/geminiService';
+import React, { useState, useRef, useCallback, PropsWithChildren, useEffect, useMemo } from 'react';
+import { ScriptLine, VoiceConfig, Episode, CustomAudioSample, ScriptTiming, GuestHost, ApiKey, AiProvider } from './types';
+import * as geminiService from './services/geminiService';
+import * as huggingFaceService from './services/huggingFaceService';
 import { extractTextFromPdf } from './services/pdfService';
-import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence, applyGain, applyNoiseGate, normalize } from './utils/audioUtils';
-import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, DotsIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon, SettingsIcon, NormalizeIcon, NoiseGateIcon, GainIcon, HuggingFaceIcon, GoogleIcon } from './components/Icons';
-import { useFileSystem } from './hooks/useFileSystem';
+import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence } from './utils/audioUtils';
+import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon, SettingsIcon, HuggingFaceIcon, GoogleIcon } from './components/Icons';
 import * as apiKeyService from './services/apiKeyService';
-import { BACKGROUND_AUDIO } from './assets/backgroundAudio';
 
 type ActiveTab = 'creator' | 'editor' | 'settings' | 'about';
 
 const Logo = () => (
     <div className="relative flex items-center justify-center" aria-label="Brands by Ai">
-        {/* Spotlight Effect */}
-        <div 
-            
-        />
         <img 
             src="https://i.ibb.co/zHWF2Hc2/90378e8b-4c88-4160-860d-4d510bdded49.png" 
             alt="Brands by Ai company logo" 
@@ -70,6 +65,33 @@ const StepIndicator: React.FC<{ currentStep: number }> = ({ currentStep }) => {
   );
 };
 
+const AiProviderSwitch: React.FC<{ provider: AiProvider; setProvider: (p: AiProvider) => void; feature: string;}> = ({ provider, setProvider, feature }) => (
+    <div>
+        <label className="block text-md font-bold text-text-primary mb-3">AI Provider for {feature}</label>
+        <div className="flex items-center gap-2 bg-zinc-900/50 border border-zinc-800 rounded-lg p-2">
+            <button 
+                onClick={() => setProvider('gemini')}
+                className={`w-full flex items-center justify-center gap-3 p-3 rounded-md transition font-semibold ${provider === 'gemini' ? 'bg-gold text-background shadow-lg shadow-gold/20' : 'hover:bg-zinc-800'}`}
+            >
+                <GoogleIcon /> Google Gemini
+            </button>
+            <button 
+                onClick={() => setProvider('huggingface')}
+                className={`w-full flex items-center justify-center gap-3 p-3 rounded-md transition font-semibold ${provider === 'huggingface' ? 'bg-gold text-background shadow-lg shadow-gold/20' : 'hover:bg-zinc-800'}`}
+            >
+                <HuggingFaceIcon /> Hugging Face
+            </button>
+        </div>
+         <p className="text-xs text-zinc-400 mt-2 text-center">
+            {provider === 'gemini' 
+                ? "Recommended for hyper-realistic voices, interruptions, and voice cloning."
+                : "Supports a wide range of open-source models. Voice cloning is unavailable."
+            }
+        </p>
+    </div>
+);
+
+
 const HostEditorCard: React.FC<PropsWithChildren<{
   id: string;
   name: string;
@@ -87,21 +109,26 @@ const HostEditorCard: React.FC<PropsWithChildren<{
   handleRemoveCustomAudio: (id: string, index: number) => void;
   handlePreviewCustomVoice: (id: string) => void;
   isPreviewingCustom: boolean;
-}>> = ({ id, name, setName, voice, setVoice, voiceOptions, handlePreviewVoice, isPreviewing, customSamples, handleToggleRecording, isRecording, audioFileInputRef, handleAudioFileChange, handleRemoveCustomAudio, handlePreviewCustomVoice, isPreviewingCustom, children }) => {
+  hasRequiredApiKey: boolean;
+  aiProvider: AiProvider;
+}>> = ({ id, name, setName, voice, setVoice, voiceOptions, handlePreviewVoice, isPreviewing, customSamples, handleToggleRecording, isRecording, audioFileInputRef, handleAudioFileChange, handleRemoveCustomAudio, handlePreviewCustomVoice, isPreviewingCustom, hasRequiredApiKey, aiProvider, children }) => {
+  const isGemini = aiProvider === 'gemini';
+  
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 space-y-6">
       <input type="text" placeholder="Host Name" value={name} onChange={(e) => setName(e.target.value)} className="w-full text-xl bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-3 focus:outline-none focus:border-gold transition font-serif font-bold" />
       
-      <div className="space-y-3">
+      <div className={`space-y-3 transition-opacity ${!isGemini ? 'opacity-50' : ''}`}>
         <label className="block text-sm font-bold text-text-primary tracking-wider">PRE-BUILT VOICE</label>
         <div className="flex items-center gap-3">
-            <select value={voice} onChange={(e) => setVoice(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition disabled:opacity-50 appearance-none" disabled={customSamples.length > 0}>
+            <select value={voice} onChange={(e) => setVoice(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition disabled:opacity-50 appearance-none" disabled={customSamples.length > 0 || !isGemini}>
                 {voiceOptions.map((v, index) => <option key={`${v.name}-${index}`} value={v.name}>{v.label}</option>)}
             </select>
-            <button onClick={() => handlePreviewVoice(id)} disabled={isPreviewing || customSamples.length > 0} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition flex-shrink-0">
+            <button onClick={() => handlePreviewVoice(id)} disabled={isPreviewing || customSamples.length > 0 || !hasRequiredApiKey || !isGemini} className="p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-on-primary disabled:opacity-50 transition flex-shrink-0">
               {isPreviewing ? <LoaderIcon /> : <PlayCircleIcon />}
             </button>
         </div>
+        {!isGemini && <p className="text-xs text-zinc-400 text-center mt-2">Pre-built voices are a Gemini feature. Hugging Face uses a default voice.</p>}
       </div>
 
       <div className="relative text-center my-4">
@@ -109,8 +136,8 @@ const HostEditorCard: React.FC<PropsWithChildren<{
         <div className="relative flex justify-center"><span className="bg-zinc-900/50 px-3 text-sm font-medium text-text-secondary uppercase tracking-wider">Or</span></div>
       </div>
 
-      <div className="space-y-4">
-        <label className="block text-sm font-bold text-text-primary tracking-wider">CUSTOM VOICE</label>
+      <div className={`space-y-4 transition-opacity ${!isGemini ? 'opacity-50' : ''}`}>
+        <label className="block text-sm font-bold text-text-primary tracking-wider">CUSTOM VOICE (GEMINI ONLY)</label>
         <p className="text-xs text-zinc-400 -mt-2">Add up to 5 audio samples (at least 10s total) for best results.</p>
         
         {customSamples.length > 0 && (
@@ -128,17 +155,17 @@ const HostEditorCard: React.FC<PropsWithChildren<{
         )}
 
         <div className="flex gap-4">
-            <button onClick={() => handleToggleRecording(id)} disabled={customSamples.length >= 5} className={`w-full flex items-center justify-center gap-3 border-2 border-zinc-700 rounded-lg p-4 transition disabled:opacity-50 disabled:cursor-not-allowed ${isRecording ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent hover:border-gold'}`}>
+            <button onClick={() => handleToggleRecording(id)} disabled={customSamples.length >= 5 || !isGemini} className={`w-full flex items-center justify-center gap-3 border-2 border-zinc-700 rounded-lg p-4 transition disabled:opacity-50 disabled:cursor-not-allowed ${isRecording ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent hover:border-gold'}`}>
                 <MicIcon /> {isRecording ? 'Stop' : 'Record'}
             </button>
             <input type="file" accept="audio/*" ref={audioFileInputRef} onChange={(e) => handleAudioFileChange(e, id)} className="hidden" />
-            <button onClick={() => audioFileInputRef.current?.click()} disabled={customSamples.length >= 5} className="w-full flex items-center justify-center gap-3 bg-transparent border-2 border-zinc-700 rounded-lg p-4 hover:border-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
+            <button onClick={() => audioFileInputRef.current?.click()} disabled={customSamples.length >= 5 || !isGemini} className="w-full flex items-center justify-center gap-3 bg-transparent border-2 border-zinc-700 rounded-lg p-4 hover:border-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
                 <UploadIcon /> Upload
             </button>
         </div>
         
         {customSamples.length > 0 && (
-             <button onClick={() => handlePreviewCustomVoice(id)} disabled={isPreviewingCustom} className="w-full flex items-center justify-center gap-3 bg-gold/10 border-2 border-gold rounded-lg p-4 hover:bg-gold/20 text-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
+             <button onClick={() => handlePreviewCustomVoice(id)} disabled={isPreviewingCustom || !hasRequiredApiKey || !isGemini} className="w-full flex items-center justify-center gap-3 bg-gold/10 border-2 border-gold rounded-lg p-4 hover:bg-gold/20 text-gold transition disabled:opacity-50 disabled:cursor-not-allowed">
                 {isPreviewingCustom ? <LoaderIcon/> : <VolumeHighIcon/>} Preview Cloned Voice
             </button>
         )}
@@ -180,11 +207,13 @@ interface StepHostsProps {
   handleAudioFileChange: (event: React.ChangeEvent<HTMLInputElement>, id: string) => void;
   isPreviewingQuality: boolean;
   handlePreviewQuality: () => void;
-  // Guest props
+  hasRequiredApiKey: boolean;
+  aiProvider: AiProvider;
   guestHosts: GuestHost[];
   handleAddGuest: () => void;
   handleRemoveGuest: (id: string) => void;
   handleUpdateGuest: (id: string, field: keyof Omit<GuestHost, 'id' | 'customSamples'>, value: any) => void;
+  handleUpdateGuestSamples: (id: string, samples: CustomAudioSample[]) => void;
   guestStates: { [id: string]: { isRecording: boolean; isPreviewing: boolean; isPreviewingCustom: boolean } };
   guestAudioFileInputRefs: React.MutableRefObject<{ [id: string]: React.RefObject<HTMLInputElement> }>;
 }
@@ -197,15 +226,18 @@ const StepHosts: React.FC<StepHostsProps> = ({
   samanthaCustomSamples, isPreviewingSamanthaCustom, isRecordingSamantha, samanthaAudioFileInputRef,
   stewardCustomSamples, isPreviewingStewardCustom, isRecordingSteward, stewardAudioFileInputRef,
   handlePreviewCustomVoice, handleRemoveCustomAudio, handleToggleRecording, handleAudioFileChange,
-  isPreviewingQuality, handlePreviewQuality,
-  guestHosts, handleAddGuest, handleRemoveGuest, handleUpdateGuest, guestStates, guestAudioFileInputRefs,
+  isPreviewingQuality, handlePreviewQuality, hasRequiredApiKey, aiProvider,
+  guestHosts, handleAddGuest, handleRemoveGuest, handleUpdateGuest, guestStates, guestAudioFileInputRefs, handleUpdateGuestSamples
 }) => (
   <Card title="I: Define Your Hosts" className="max-w-6xl mx-auto">
       <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <p className="text-text-secondary text-center sm:text-left">Preview the hyper-realistic voice quality and natural conversation flow.</p>
+        <div className="flex-grow text-center sm:text-left">
+            <p className="text-text-secondary">Preview the hyper-realistic voice quality and natural conversation flow.</p>
+            {!hasRequiredApiKey && <p className="text-xs text-yellow-400/80 mt-1">An API Key for the selected provider ({aiProvider}) is required to preview voices.</p>}
+        </div>
         <button 
             onClick={handlePreviewQuality} 
-            disabled={isPreviewingQuality} 
+            disabled={isPreviewingQuality || !hasRequiredApiKey} 
             className="bg-gold text-background font-bold py-3 px-6 rounded-lg hover:opacity-90 transition flex items-center gap-2 text-sm disabled:bg-zinc-600 disabled:text-text-secondary w-full sm:w-auto justify-center shadow-lg shadow-gold/20"
         >
             {isPreviewingQuality ? <><LoaderIcon /> Playing...</> : <><PlayCircleIcon /> Play Preview</>}
@@ -227,6 +259,8 @@ const StepHosts: React.FC<StepHostsProps> = ({
               handleRemoveCustomAudio={handleRemoveCustomAudio}
               handlePreviewCustomVoice={handlePreviewCustomVoice}
               isPreviewingCustom={isPreviewingSamanthaCustom}
+              hasRequiredApiKey={hasRequiredApiKey}
+              aiProvider={aiProvider}
           />
           <HostEditorCard
               id="steward"
@@ -241,6 +275,8 @@ const StepHosts: React.FC<StepHostsProps> = ({
               handleRemoveCustomAudio={handleRemoveCustomAudio}
               handlePreviewCustomVoice={handlePreviewCustomVoice}
               isPreviewingCustom={isPreviewingStewardCustom}
+              hasRequiredApiKey={hasRequiredApiKey}
+              aiProvider={aiProvider}
           />
 
         <div className="lg:col-span-2 space-y-8">
@@ -271,6 +307,8 @@ const StepHosts: React.FC<StepHostsProps> = ({
                     handleRemoveCustomAudio={handleRemoveCustomAudio}
                     handlePreviewCustomVoice={handlePreviewCustomVoice}
                     isPreviewingCustom={guestStates[guest.id]?.isPreviewingCustom || false}
+                    hasRequiredApiKey={hasRequiredApiKey}
+                    aiProvider={aiProvider}
                 >
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                         <div>
@@ -296,7 +334,11 @@ const StepHosts: React.FC<StepHostsProps> = ({
           </button>
         </div>
       </div>
-
+       {!hasRequiredApiKey && (
+        <div className="mt-8 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-center text-sm text-yellow-300">
+            <strong>Voice Previews Disabled:</strong> An API Key for {aiProvider === 'gemini' ? 'Google Gemini' : 'Hugging Face'} is required. Please add one in the <strong>Settings</strong> tab.
+        </div>
+      )}
       <div className="pt-8 border-t border-zinc-800 flex justify-end">
           <button onClick={() => { setError(''); setCurrentStep(2) }} disabled={!areHostsValid()} className="bg-primary text-on-primary font-bold py-4 px-10 rounded-lg hover:bg-primary-hover transition flex items-center gap-2 text-lg disabled:bg-zinc-600 shadow-primary-glow">
               Next: Content <ChevronRightIcon />
@@ -330,6 +372,9 @@ interface StepContentProps {
   handleGenerateScript: () => void;
   isLoadingScript: boolean;
   areContentInputsValid: () => boolean;
+  hasRequiredApiKey: boolean;
+  aiProvider: AiProvider;
+  setAiProvider: (p: AiProvider) => void;
 }
 
 const StepContent: React.FC<StepContentProps> = ({
@@ -338,7 +383,7 @@ const StepContent: React.FC<StepContentProps> = ({
   fileName, fileInputRef, handleFileChange, 
   samanthaName, stewardName, manualScriptText, setManualScriptText, customRules, 
   setCustomRules, setCurrentStep, handleGenerateScript, isLoadingScript, 
-  areContentInputsValid
+  areContentInputsValid, hasRequiredApiKey, aiProvider, setAiProvider
 }) => (
   <Card title="II: Content & AI Rules" className="max-w-4xl mx-auto">
     {error && <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-4"><ErrorIcon /><p className="font-semibold text-red-300">{error}</p></div>}
@@ -374,6 +419,7 @@ const StepContent: React.FC<StepContentProps> = ({
         </div>
     </div>
      <div className="space-y-6">
+        <AiProviderSwitch provider={aiProvider} setProvider={setAiProvider} feature="Script Generation" />
         <h3 className="text-lg font-semibold text-text-primary">Option A: Generate with AI</h3>
         <div>
             <label htmlFor="prompt" className="block text-sm font-medium text-text-secondary mb-2">PODCAST TOPIC</label>
@@ -403,17 +449,27 @@ const StepContent: React.FC<StepContentProps> = ({
           <label htmlFor="custom-rules" className="block text-md font-bold text-text-primary mb-2">Advanced AI Rules (Optional)</label>
           <textarea id="custom-rules" rows={4} className="w-full text-lg bg-zinc-800/50 placeholder:text-text-secondary border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition" placeholder="- Never mention the year 2020.&#10;- Ensure Samantha asks at least two questions." value={customRules} onChange={(e) => setCustomRules(e.target.value)}/>
       </div>
-      <div className="pt-8 border-t border-zinc-800 flex justify-between items-center">
+      <div className="pt-8 border-t border-zinc-800 flex justify-between items-start">
           <button onClick={() => setCurrentStep(1)} className="font-bold py-4 px-10 rounded-lg hover:bg-zinc-800 transition flex items-center gap-2 text-lg">
               <ChevronLeftIcon /> Back
           </button>
-          <button onClick={() => handleGenerateScript()} disabled={isLoadingScript || !areContentInputsValid()} className="bg-primary text-on-primary font-bold py-4 px-10 rounded-lg hover:bg-primary-hover transition flex items-center gap-2 text-lg disabled:bg-zinc-600 shadow-primary-glow">
-              {isLoadingScript ? <><LoaderIcon />Generating...</> : <><ScriptIcon /> Generate Script</>}
-          </button>
+          <div className="flex flex-col items-end gap-2">
+            <button onClick={() => handleGenerateScript()} disabled={isLoadingScript || !areContentInputsValid() || !hasRequiredApiKey} className="bg-primary text-on-primary font-bold py-4 px-10 rounded-lg hover:bg-primary-hover transition flex items-center gap-2 text-lg disabled:bg-zinc-600 shadow-primary-glow">
+                {isLoadingScript ? <><LoaderIcon />Generating...</> : <><ScriptIcon /> Generate Script</>}
+            </button>
+            {!hasRequiredApiKey && (
+              <p className="text-xs text-yellow-400/80 mt-1 text-right">
+                An API Key for {aiProvider} is required.
+              </p>
+            )}
+          </div>
       </div>
   </Card>
 );
 
+// ... (rest of the components will be updated similarly) ...
+// The following is a placeholder for the rest of the file which will be updated in subsequent steps.
+// The changes are significant and will be broken down.
 interface ScriptDisplayProps {
     script: ScriptLine[];
     setScript?: (script: ScriptLine[]) => void;
@@ -485,16 +541,19 @@ interface StepScriptAndAudioProps {
   setScript: (script: ScriptLine[]) => void;
   setCurrentStep: (step: number) => void;
   handleGenerateAudio: () => void;
+  hasRequiredApiKey: boolean;
+  aiProvider: AiProvider;
+  setAiProvider: (p: AiProvider) => void;
   backgroundSound: string;
   setBackgroundSound: (sound: string) => void;
   backgroundVolume: number;
-  setBackgroundVolume: (volume: number) => void;
+  setBackgroundVolume: (vol: number) => void;
 }
 
 const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
   error, isLoadingAudio, brandedName, setBrandedName, contactDetails, setContactDetails, website,
-  setWebsite, slogan, setSlogan, script, setScript, setCurrentStep, handleGenerateAudio,
-  backgroundSound, setBackgroundSound, backgroundVolume, setBackgroundVolume
+  setWebsite, slogan, setSlogan, script, setScript, setCurrentStep, handleGenerateAudio, hasRequiredApiKey,
+  aiProvider, setAiProvider, backgroundSound, setBackgroundSound, backgroundVolume, setBackgroundVolume
 }) => {
     const [isEditing, setIsEditing] = useState(false);
     if (!script) return null;
@@ -506,50 +565,44 @@ const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
                 {isLoadingAudio ? (
                     <div className="bg-surface rounded-xl p-8 flex flex-col items-center justify-center gap-4 text-center">
                         <LoaderIcon />
-                        <p className="text-lg text-text-secondary">Synthesizing & mixing audio...</p>
+                        <p className="text-lg text-text-secondary">Synthesizing audio...</p>
                         <p className="text-sm text-text-secondary">This can take a few minutes for longer scripts.</p>
                     </div>
                 ) : (
                     <Card title="III: Finalize & Generate">
+                         <AiProviderSwitch provider={aiProvider} setProvider={setAiProvider} feature="Audio Generation" />
                         <div className="space-y-8">
                             <input type="text" placeholder="Branded Name (e.g., Brands by AI)" value={brandedName} onChange={(e) => setBrandedName(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Contact Details (e.g., email)" value={contactDetails} onChange={(e) => setContactDetails(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Website (e.g., yoursite.com)" value={website} onChange={(e) => setWebsite(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Slogan" value={slogan} onChange={(e) => setSlogan(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                         </div>
-                         <div className="space-y-4 pt-8 border-t border-zinc-800">
-                            <h3 className="text-lg font-semibold text-text-primary">Background Audio Mixer</h3>
-                            <div>
-                                <label htmlFor="bg-sound" className="block text-sm font-medium text-text-secondary mb-2">TRACK</label>
-                                <select id="bg-sound" value={backgroundSound} onChange={e => setBackgroundSound(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
-                                    <option value="none">None</option>
-                                    {Object.entries(BACKGROUND_AUDIO).map(([key, track]) => (
-                                        <option key={key} value={key}>{track.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                             <div>
-                                <label htmlFor="bg-volume" className="block text-sm font-medium text-text-secondary mb-2">VOLUME: <span className="font-mono text-gold">{Math.round(backgroundVolume * 100)}%</span></label>
-                                <input 
-                                    type="range" 
-                                    id="bg-volume"
-                                    min="0"
-                                    max="1"
-                                    step="0.01"
-                                    value={backgroundVolume}
-                                    onChange={e => setBackgroundVolume(parseFloat(e.target.value))}
-                                    className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold"
-                                    disabled={backgroundSound === 'none'}
-                                />
-                            </div>
+                        <div className="space-y-4">
+                            <label className="block text-md font-bold text-text-primary">Background Audio</label>
+                            <select value={backgroundSound} onChange={e => setBackgroundSound(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
+                                <option value="none">None</option>
+                            </select>
+                             {backgroundSound !== 'none' && (
+                                <div>
+                                    <label className="block text-sm font-bold text-text-secondary">Volume: {Math.round(backgroundVolume * 100)}%</label>
+                                    <input type="range" min="0" max="1" step="0.01" value={backgroundVolume} onChange={e => setBackgroundVolume(parseFloat(e.target.value))} className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold mt-2" />
+                                </div>
+                            )}
                         </div>
-                        <div className="pt-8 border-t border-zinc-800 flex justify-between items-center">
+                        <div className="pt-8 border-t border-zinc-800 flex justify-between items-start">
                             <button onClick={() => { setScript([]); setCurrentStep(2); }} className="font-bold py-4 px-10 rounded-lg hover:bg-zinc-800 transition flex items-center gap-2 text-lg">
                                 <ChevronLeftIcon /> Back
                             </button>
-                            <button onClick={handleGenerateAudio} className="bg-primary text-on-primary font-bold py-4 px-10 rounded-lg hover:bg-primary-hover transition flex justify-center items-center gap-2 text-lg shadow-primary-glow">
-                                <AudioIcon /><span>Generate Podcast</span>
-                            </button>
+                             <div className="flex flex-col items-end gap-2">
+                                <button onClick={handleGenerateAudio} disabled={!hasRequiredApiKey} className="bg-primary text-on-primary font-bold py-4 px-10 rounded-lg hover:bg-primary-hover transition flex justify-center items-center gap-2 text-lg shadow-primary-glow disabled:bg-zinc-600">
+                                    <AudioIcon /><span>Generate Podcast</span>
+                                </button>
+                                {!hasRequiredApiKey && (
+                                  <p className="text-xs text-yellow-400/80 mt-1 text-right">
+                                    An API Key for {aiProvider} is required.
+                                  </p>
+                                )}
+                            </div>
                         </div>
                     </Card>
                 )}
@@ -586,13 +639,14 @@ interface StepStudioProps {
   setAdScript: (script: string | null) => void;
   episodeTitle: string;
   brandedName: string;
+  hasRequiredApiKey: boolean;
 }
 
 const StepStudio: React.FC<StepStudioProps> = ({
   audioData, setAudioData, script, scriptTimings,
   handleDownloadAudio, handleStartOver, handleSaveOrUpdateEpisode, loadedEpisodeId,
   areTimingsStale, setAreTimingsStale, adText, setAdText, adScript, setAdScript,
-  episodeTitle, brandedName
+  episodeTitle, brandedName, hasRequiredApiKey
 }) => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -616,7 +670,6 @@ const StepStudio: React.FC<StepStudioProps> = ({
         return `${minutes}:${seconds.toString().padStart(2, '0')}`;
     };
     
-    // Create Blob URL from audio data
     useEffect(() => {
         if (audioData && audioRef.current) {
             const rawData = decode(audioData);
@@ -647,7 +700,6 @@ const StepStudio: React.FC<StepStudioProps> = ({
         
         ctx.clearRect(0, 0, width, height);
 
-        // Draw full waveform in gray
         ctx.strokeStyle = '#a1a1aa';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -659,7 +711,6 @@ const StepStudio: React.FC<StepStudioProps> = ({
         }
         ctx.stroke();
         
-        // Draw progress in gold
         const progressX = duration > 0 ? (currentTime / duration) * width : 0;
         ctx.save();
         ctx.beginPath();
@@ -677,7 +728,6 @@ const StepStudio: React.FC<StepStudioProps> = ({
         ctx.stroke();
         ctx.restore();
 
-        // Draw selection if active
         if (isEditorActive && selection) {
             ctx.fillStyle = 'rgba(225, 29, 72, 0.3)';
             const startX = (selection.start / duration) * width;
@@ -687,7 +737,6 @@ const StepStudio: React.FC<StepStudioProps> = ({
 
     }, [currentTime, duration, isEditorActive, selection]);
 
-    // Effect for visualizing audio
     useEffect(() => {
         if (!audioData) return;
         
@@ -698,7 +747,7 @@ const StepStudio: React.FC<StepStudioProps> = ({
             channelData[i] = pcm[i] / 32768.0;
         }
 
-        const samples = Math.floor(400 * (isEditorActive ? zoom : 1)); // Increase samples when zooming
+        const samples = Math.floor(400 * (isEditorActive ? zoom : 1));
         const blockSize = Math.floor(channelData.length / samples);
         const filteredData = [];
         for (let i = 0; i < samples; i++) {
@@ -743,7 +792,6 @@ const StepStudio: React.FC<StepStudioProps> = ({
         };
     }, []);
     
-    // Find active script line
     useEffect(() => {
         if (areTimingsStale) return;
         const activeLine = scriptTimings.find(
@@ -825,7 +873,7 @@ const StepStudio: React.FC<StepStudioProps> = ({
         if (!selection || audioData === null) return;
         setAudioHistory(prev => [...prev, audioData]);
         const pcmData = decode(audioData);
-        const bytesPerSample = 2; // 16-bit
+        const bytesPerSample = 2;
         const sampleRate = 24000;
         
         let startByte = Math.floor(selection.start * sampleRate * bytesPerSample);
@@ -838,7 +886,7 @@ const StepStudio: React.FC<StepStudioProps> = ({
             const part1 = pcmData.slice(0, startByte);
             const part2 = pcmData.slice(endByte);
             newData = concatenatePcm([part1, part2]);
-        } else { // trim
+        } else {
             newData = pcmData.slice(startByte, endByte);
         }
         setAudioData(encode(newData));
@@ -859,14 +907,14 @@ const StepStudio: React.FC<StepStudioProps> = ({
         setIsLoadingAd(type);
         try {
             if (type === 'text') {
-                const text = await generateAdText(script, episodeTitle, brandedName);
+                const text = await geminiService.generateAdText(script, episodeTitle, brandedName);
                 setAdText(text);
             } else {
-                const ad = await generateAdScript(script, episodeTitle, brandedName);
+                const ad = await geminiService.generateAdScript(script, episodeTitle, brandedName);
                 setAdScript(ad);
             }
         } catch (e) {
-            // Handle error
+            console.error(e)
         } finally {
             setIsLoadingAd(null);
         }
@@ -964,13 +1012,14 @@ const StepStudio: React.FC<StepStudioProps> = ({
                          <div className="space-y-4 pt-4 border-t border-zinc-700/50">
                              <h4 className="text-md font-semibold text-text-primary">Promotional Content</h4>
                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <button onClick={() => handleGenerateAd('text')} disabled={!!isLoadingAd} className="bg-zinc-800 hover:bg-zinc-700/80 p-4 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50">
+                                <button onClick={() => handleGenerateAd('text')} disabled={!!isLoadingAd || !hasRequiredApiKey} className="bg-zinc-800 hover:bg-zinc-700/80 p-4 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50">
                                     {isLoadingAd === 'text' ? <LoaderIcon/> : <WandIcon/>} Generate Social Post
                                 </button>
-                                <button onClick={() => handleGenerateAd('script')} disabled={!!isLoadingAd} className="bg-zinc-800 hover:bg-zinc-700/80 p-4 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50">
+                                <button onClick={() => handleGenerateAd('script')} disabled={!!isLoadingAd || !hasRequiredApiKey} className="bg-zinc-800 hover:bg-zinc-700/80 p-4 rounded-lg flex items-center justify-center gap-2 transition disabled:opacity-50">
                                     {isLoadingAd === 'script' ? <LoaderIcon/> : <AudioIcon/>} Generate Ad Script
                                 </button>
                              </div>
+                              {!hasRequiredApiKey && <p className="text-xs text-yellow-400/80 mt-2 text-center">A Gemini API Key is required to generate content.</p>}
                              {adText && <div className="p-4 bg-zinc-900/50 rounded-lg relative"><button onClick={() => copyToClipboard(adText)} className="absolute top-2 right-2 p-2 bg-zinc-700 rounded-full hover:bg-zinc-600"><CopyIcon/></button><p className="whitespace-pre-wrap text-sm text-text-secondary">{adText}</p></div>}
                              {adScript && <div className="p-4 bg-zinc-900/50 rounded-lg relative"><button onClick={() => copyToClipboard(adScript)} className="absolute top-2 right-2 p-2 bg-zinc-700 rounded-full hover:bg-zinc-600"><CopyIcon/></button><p className="whitespace-pre-wrap text-sm text-text-secondary">{adScript}</p></div>}
                          </div>
@@ -1044,7 +1093,6 @@ const CreatorPopup: React.FC<{ onClose: () => void }> = ({ onClose }) => (
     </div>
 );
 
-
 const Footer: React.FC<{ onCreatorClick: () => void }> = ({ onCreatorClick }) => {
     const currentYear = new Date().getFullYear();
     return (
@@ -1063,7 +1111,7 @@ const Footer: React.FC<{ onCreatorClick: () => void }> = ({ onCreatorClick }) =>
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('creator');
   const [currentStep, setCurrentStep] = useState(1);
-  const { connectFolder, disconnectFolder, directoryHandle, writeFile, listFiles, isSupported } = useFileSystem();
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
   // Step 1
   const [samanthaName, setSamanthaName] = useState('Samantha');
@@ -1082,7 +1130,7 @@ export default function App() {
   const stewardAudioFileInputRef = useRef<HTMLInputElement>(null);
   const [guestHosts, setGuestHosts] = useState<GuestHost[]>([]);
   const [guestStates, setGuestStates] = useState<{[id: string]: { isRecording: boolean; isPreviewing: boolean; isPreviewingCustom: boolean }}>({});
-  const guestAudioFileInputRefs = useRef<{ [id: string]: React.RefObject<HTMLInputElement> }>({});
+  const guestAudioFileInputRefs = useRef<{[id: string]: React.RefObject<HTMLInputElement>}>({});
   const [isPreviewingQuality, setIsPreviewingQuality] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -1097,6 +1145,7 @@ export default function App() {
   const [manualScriptText, setManualScriptText] = useState<string>('');
   const [customRules, setCustomRules] = useState<string>('');
   const [language, setLanguage] = useState<'English' | 'Afrikaans'>('English');
+  const [aiProvider, setAiProvider] = useState<AiProvider>('gemini');
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Step 3
@@ -1107,7 +1156,7 @@ export default function App() {
   const [slogan, setSlogan] = useState('');
   const [backgroundSound, setBackgroundSound] = useState('none');
   const [backgroundVolume, setBackgroundVolume] = useState(0.1);
-
+  
   // Step 4
   const [audioData, setAudioData] = useState<string | null>(null);
   const [scriptTimings, setScriptTimings] = useState<ScriptTiming[] | null>(null);
@@ -1119,23 +1168,39 @@ export default function App() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [loadedEpisodeId, setLoadedEpisodeId] = useState<string | null>(null);
 
-  // Global & Settings
+  // Global
   const [isLoadingScript, setIsLoadingScript] = useState<boolean>(false);
   const [isLoadingAudio, setIsLoadingAudio] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [isCreatorPopupVisible, setIsCreatorPopupVisible] = useState(false);
-  const [userApiKeys, setUserApiKeys] = useState<ApiKey[]>(apiKeyService.getApiKeys());
 
+  useEffect(() => {
+    setApiKeys(apiKeyService.getApiKeys());
+  }, []);
+
+  const hasRequiredApiKey = useMemo(() => {
+    const keyType = aiProvider;
+    if (keyType === 'gemini') {
+        const envKey = process.env.API_KEY || process.env.API_KEY_1 || process.env.API_KEY_2 || process.env.API_KEY_3;
+        return apiKeys.some(k => k.type === 'gemini' && k.key.trim() !== '') || !!envKey;
+    }
+    return apiKeys.some(k => k.type === 'huggingface' && k.key.trim() !== '');
+  }, [apiKeys, aiProvider]);
+
+
+  const handleKeysUpdated = (newKeys: ApiKey[]) => {
+    apiKeyService.saveApiKeys(newKeys);
+    setApiKeys(newKeys);
+  };
+  
   const femaleVoices = [
-      { name: 'Kore', label: 'Twitch Streamer (Female, Energetic)' },
-      { name: 'Kore', label: 'Kore (Female, Clear & Professional)' },
-      { name: 'Charon', label: 'Charon (Female, Warm & Raspy)' },
+      { name: 'Kore', label: 'Female, Clear & Professional' },
+      { name: 'Charon', label: 'Female, Warm & Raspy' },
   ];
   const maleVoices = [
-      { name: 'Puck', label: 'Twitch Streamer (Male, Expressive)' },
-      { name: 'Fenrir', label: 'Fenrir (Male, Deep & Resonant)' },
-      { name: 'Puck', label: 'Puck (Male, Warm & Engaging)' },
-      { name: 'Zephyr', label: 'Zephyr (Male, Crisp & Professional)' },
+      { name: 'Fenrir', label: 'Male, Deep & Resonant' },
+      { name: 'Puck', label: 'Male, Warm & Engaging' },
+      { name: 'Zephyr', label: 'Male, Crisp & Professional' },
   ];
   
   const resetState = (isNewEpisode: boolean = false) => {
@@ -1155,6 +1220,7 @@ export default function App() {
         setLoadedEpisodeId(null);
         setEpisodeTitle('');
         setEpisodeLength(10);
+        setAiProvider('gemini');
         if (episodes.length > 0) {
             const maxEpNum = Math.max(...episodes.map(e => e.episodeNumber));
             setEpisodeNumber(maxEpNum + 1);
@@ -1169,29 +1235,41 @@ export default function App() {
     setCurrentStep(1);
   };
   
-  const loadAllEpisodes = useCallback(async () => {
-      let loadedEpisodes: Episode[] = [];
-      if (directoryHandle) {
-          loadedEpisodes = await listFiles();
-      } else {
-           try {
-              const savedEpisodes = localStorage.getItem('podcastEpisodes');
-              if (savedEpisodes) loadedEpisodes = JSON.parse(savedEpisodes);
-          } catch (e) { console.error("Failed to load from localStorage", e); }
-      }
-      setEpisodes(loadedEpisodes);
-      if (loadedEpisodes.length > 0) {
-        const maxEpNum = Math.max(...loadedEpisodes.map(e => e.episodeNumber));
-        setEpisodeNumber(maxEpNum + 1);
-      } else {
-        setEpisodeNumber(1);
-      }
-  }, [directoryHandle, listFiles]);
-  
   useEffect(() => {
-    loadAllEpisodes();
-  }, [loadAllEpisodes]);
-  
+    try {
+        const savedEpisodes = localStorage.getItem('podcastEpisodes');
+        if (savedEpisodes) {
+            const parsed = JSON.parse(savedEpisodes);
+            setEpisodes(parsed);
+            if (parsed.length > 0) {
+                const maxEpNum = Math.max(...parsed.map((e: Episode) => e.episodeNumber));
+                setEpisodeNumber(maxEpNum + 1);
+            }
+        }
+    } catch (error) {
+        console.error("Failed to load episodes from localStorage", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+        const storableEpisodes = episodes.map(ep => {
+            const { audioData, samanthaCustomSamples, stewardCustomSamples, guestHosts, ...storableEpisode } = ep;
+            const storableGuests = guestHosts.map(g => ({...g, customSamples: []}));
+            return { 
+                ...storableEpisode, 
+                audioData: null,
+                samanthaCustomSamples: [],
+                stewardCustomSamples: [],
+                guestHosts: storableGuests
+            };
+        });
+        localStorage.setItem('podcastEpisodes', JSON.stringify(storableEpisodes));
+    } catch (error) {
+        console.error("Failed to save episodes to localStorage", error);
+    }
+  }, [episodes]);
+
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -1205,6 +1283,7 @@ export default function App() {
   };
 
   const handleGenerateScript = useCallback(async () => {
+    if (!hasRequiredApiKey) { setError(`An API Key for ${aiProvider} is required to generate a script.`); return; }
     if (!episodeTitle.trim() || episodeNumber <= 0) {
         setError('Please provide an Episode Title and Number.'); setCurrentStep(2); return;
     }
@@ -1216,45 +1295,56 @@ export default function App() {
     
     try {
       const branding = { name: brandedName, contact: contactDetails, website, slogan };
-      const generatedScript = await generateScript( prompt, pdfText, branding, manualScriptText, customRules, language, samanthaName || 'Samantha', stewardName || 'Steward', guestHosts, 'South African', episodeTitle, episodeNumber, episodeLength );
+      let generatedScript: ScriptLine[];
+
+      if (aiProvider === 'gemini') {
+        generatedScript = await geminiService.generateScript( prompt, pdfText, branding, manualScriptText, customRules, language, samanthaName || 'Samantha', stewardName || 'Steward', guestHosts, 'South African', episodeTitle, episodeNumber, episodeLength );
+      } else {
+        generatedScript = await huggingFaceService.generateScript( prompt, pdfText, branding, manualScriptText, customRules, language, samanthaName || 'Samantha', stewardName || 'Steward', guestHosts, 'South African', episodeTitle, episodeNumber, episodeLength );
+      }
       setScript(generatedScript); setCurrentStep(3);
     } catch (e: any) {
       setError(`Failed to generate script: ${e.message}`);
     } finally {
       setIsLoadingScript(false);
     }
-  }, [prompt, pdfText, brandedName, contactDetails, website, slogan, manualScriptText, customRules, language, samanthaName, stewardName, guestHosts, episodeTitle, episodeNumber, episodeLength]);
+  }, [prompt, pdfText, brandedName, contactDetails, website, slogan, manualScriptText, customRules, language, samanthaName, stewardName, guestHosts, episodeTitle, episodeNumber, episodeLength, hasRequiredApiKey, aiProvider]);
   
   const handleGenerateAudio = useCallback(async () => {
+    if (!hasRequiredApiKey) { setError(`An API Key for ${aiProvider} is required to generate audio.`); return; }
     if (!script) { setError('No script available to generate audio.'); return; }
     setIsLoadingAudio(true); setError(''); setAudioData(null); setScriptTimings(null); setAreTimingsStale(false);
 
     try {
-        const getVoiceConfig = async (samples: CustomAudioSample[], prebuiltName: string): Promise<VoiceConfig> => {
-            if (samples.length > 0) {
-                const { data, mimeType } = await combineCustomAudioSamples(samples);
-                return { type: 'custom', data, mimeType };
-            }
-            return { type: 'prebuilt', name: prebuiltName };
-        };
+        let audioResult: { audioData: string; timings: ScriptTiming[] };
+        
+        if (aiProvider === 'gemini') {
+            const getVoiceConfig = async (samples: CustomAudioSample[], prebuiltName: string): Promise<VoiceConfig> => {
+                if (samples.length > 0) {
+                    const { data, mimeType } = await combineCustomAudioSamples(samples);
+                    return { type: 'custom', data, mimeType };
+                }
+                return { type: 'prebuilt', name: prebuiltName };
+            };
+            const samanthaVoiceConfig = await getVoiceConfig(samanthaCustomSamples, samanthaVoice);
+            const stewardVoiceConfig = await getVoiceConfig(stewardCustomSamples, stewardVoice);
+            const guestHostPayloads = await Promise.all(guestHosts.map(async (guest) => ({
+                name: guest.name,
+                voiceConfig: await getVoiceConfig(guest.customSamples, guest.voice)
+            })));
+             audioResult = await geminiService.generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, guestHostPayloads, 'South African', backgroundSound, backgroundVolume);
+        } else {
+            audioResult = await huggingFaceService.generatePodcastAudio(script);
+        }
 
-      const samanthaVoiceConfig = await getVoiceConfig(samanthaCustomSamples, samanthaVoice);
-      const stewardVoiceConfig = await getVoiceConfig(stewardCustomSamples, stewardVoice);
-      
-      const guestHostsPayload = await Promise.all(guestHosts.map(async (guest) => ({
-          name: guest.name,
-          voiceConfig: await getVoiceConfig(guest.customSamples, guest.voice),
-      })));
-
-      const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, guestHostsPayload, 'South African', backgroundSound, backgroundVolume);
-      setAudioData(audioData); setScriptTimings(timings); setCurrentStep(4);
+      setAudioData(audioResult.audioData); setScriptTimings(audioResult.timings); setCurrentStep(4);
     } catch (e: any) {
       setError(`Failed to generate audio: ${e.message}`);
       setCurrentStep(3);
     } finally {
       setIsLoadingAudio(false);
     }
-  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, guestHosts, samanthaName, stewardName, backgroundSound, backgroundVolume]);
+  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, samanthaName, stewardName, guestHosts, hasRequiredApiKey, aiProvider, backgroundSound, backgroundVolume]);
 
   const handleDownloadAudio = () => {
     if (!audioData) return;
@@ -1271,26 +1361,18 @@ export default function App() {
   };
   
   const handlePreviewVoice = useCallback(async (id: string) => {
-    let voiceName: string;
-    let setIsPreviewing: (val: boolean) => void;
-
-    if (id === 'samantha') {
-      voiceName = samanthaVoice;
-      setIsPreviewing = setIsPreviewingSamantha;
-    } else if (id === 'steward') {
-      voiceName = stewardVoice;
-      setIsPreviewing = setIsPreviewingSteward;
-    } else {
-      const guest = guestHosts.find(g => g.id === id);
-      if (!guest) return;
-      voiceName = guest.voice;
-      setIsPreviewing = (val) => setGuestStates(prev => ({...prev, [id]: { ...prev[id], isPreviewing: val }}));
+    let voiceName: string, setIsPreviewing: (val: boolean) => void;
+    if (id === 'samantha') { voiceName = samanthaVoice; setIsPreviewing = setIsPreviewingSamantha; } 
+    else if (id === 'steward') { voiceName = stewardVoice; setIsPreviewing = setIsPreviewingSteward; } 
+    else { 
+        const guest = guestHosts.find(g => g.id === id);
+        if (!guest) return;
+        voiceName = guest.voice;
+        setIsPreviewing = (val) => setGuestStates(p => ({...p, [id]: {...p[id], isPreviewing: val}}));
     }
-
-    setIsPreviewing(true);
-    setError('');
+    setIsPreviewing(true); setError('');
     try {
-      const audioBase64 = await previewVoice(voiceName, language, 'South African');
+      const audioBase64 = await geminiService.previewVoice(voiceName, language, 'South African');
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       const decodedData = decode(audioBase64);
       const buffer = await customDecodeAudioData(decodedData, audioContext, 24000, 1);
@@ -1300,16 +1382,14 @@ export default function App() {
       source.start();
       source.onended = () => setIsPreviewing(false);
     } catch (e: any) {
-      setError(`Failed to preview voice: ${e.message}`);
-      setIsPreviewing(false);
+      setError(`Failed to preview voice: ${e.message}`); setIsPreviewing(false);
     }
-  }, [samanthaVoice, stewardVoice, language, guestHosts]);
-
+  }, [samanthaVoice, stewardVoice, guestHosts, language]);
 
   const handlePreviewQuality = async () => {
     setIsPreviewingQuality(true); setError('');
     try {
-        const audioBase64 = await generateQualityPreviewAudio(samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoice, stewardVoice, 'South African');
+        const audioBase64 = await geminiService.generateQualityPreviewAudio(samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoice, stewardVoice, 'South African');
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
         const decodedData = decode(audioBase64);
         const buffer = await customDecodeAudioData(decodedData, audioContext, 24000, 1);
@@ -1322,20 +1402,14 @@ export default function App() {
   };
   
   const handlePreviewCustomVoice = useCallback(async (id: string) => {
-    let customSamples: CustomAudioSample[];
-    let setIsPreviewing: (val: boolean) => void;
-
-    if (id === 'samantha') {
-      customSamples = samanthaCustomSamples;
-      setIsPreviewing = setIsPreviewingSamanthaCustom;
-    } else if (id === 'steward') {
-      customSamples = stewardCustomSamples;
-      setIsPreviewing = setIsPreviewingStewardCustom;
-    } else {
-      const guest = guestHosts.find(g => g.id === id);
-      if (!guest) return;
-      customSamples = guest.customSamples;
-      setIsPreviewing = (val) => setGuestStates(prev => ({...prev, [id]: { ...prev[id], isPreviewingCustom: val }}));
+    let customSamples: CustomAudioSample[], setIsPreviewing: (val: boolean) => void;
+    if (id === 'samantha') { customSamples = samanthaCustomSamples; setIsPreviewing = setIsPreviewingSamanthaCustom; } 
+    else if (id === 'steward') { customSamples = stewardCustomSamples; setIsPreviewing = setIsPreviewingStewardCustom; } 
+    else {
+        const guest = guestHosts.find(g => g.id === id);
+        if (!guest) return;
+        customSamples = guest.customSamples;
+        setIsPreviewing = (val) => setGuestStates(p => ({...p, [id]: {...p[id], isPreviewingCustom: val}}));
     }
     
     if (customSamples.length === 0) return;
@@ -1343,7 +1417,7 @@ export default function App() {
     setIsPreviewing(true); setError('');
     try {
       const combinedSample = await combineCustomAudioSamples(customSamples);
-      const audioBase64 = await previewClonedVoice(combinedSample, language, 'South African');
+      const audioBase64 = await geminiService.previewClonedVoice(combinedSample, language, 'South African');
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       const decodedData = decode(audioBase64);
       const buffer = await customDecodeAudioData(decodedData, audioContext, 24000, 1);
@@ -1356,88 +1430,76 @@ export default function App() {
   }, [samanthaCustomSamples, stewardCustomSamples, guestHosts, language]);
   
   const handleToggleRecording = async (id: string) => {
-    const startRecording = async (setIsRecording: (val: boolean) => void, setSamples: (updater: (prev: CustomAudioSample[]) => CustomAudioSample[]) => void) => {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-            mediaRecorderRef.current = mediaRecorder;
-            audioChunksRef.current = [];
-            mediaRecorder.ondataavailable = (event) => audioChunksRef.current.push(event.data);
-            mediaRecorder.onstop = async () => {
-                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-                try {
-                    const { base64, mimeType } = await import('./utils/audioUtils').then(m => m.processAudioForCloning(audioBlob));
-                    const url = `data:${mimeType};base64,${base64}`;
-                    const customAudio: CustomAudioSample = { url, base64, mimeType, name: `Recording ${new Date().toLocaleTimeString()}` };
-                    setSamples(prev => [...prev, customAudio]);
-                } catch (e: any) {
-                    setError(e.message || "Failed to process recording.");
-                } finally {
-                    stream.getTracks().forEach(track => track.stop());
-                }
-            };
-            mediaRecorder.start();
-            setIsRecording(true);
-        } catch (e) {
-            setError("Could not access microphone.");
-        }
-    };
-
-    const stopRecording = (setIsRecording: (val: boolean) => void) => {
-        mediaRecorderRef.current?.stop();
-        setIsRecording(false);
-    };
-
-    if (id === 'samantha') {
-        if (samanthaCustomSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
-        isRecordingSamantha ? stopRecording(setIsRecordingSamantha) : startRecording(setIsRecordingSamantha, setSamanthaCustomSamples);
-    } else if (id === 'steward') {
-        if (stewardCustomSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
-        isRecordingSteward ? stopRecording(setIsRecordingSteward) : startRecording(setIsRecordingSteward, setStewardCustomSamples);
-    } else {
+    let isRecording: boolean, setIsRecording: (val: boolean) => void, samples: CustomAudioSample[];
+    if (id === 'samantha') { isRecording = isRecordingSamantha; setIsRecording = setIsRecordingSamantha; samples = samanthaCustomSamples; } 
+    else if (id === 'steward') { isRecording = isRecordingSteward; setIsRecording = setIsRecordingSteward; samples = stewardCustomSamples; } 
+    else {
         const guest = guestHosts.find(g => g.id === id);
-        const guestState = guestStates[id];
-        if (!guest || !guestState) return;
-        if (guest.customSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
-        
-        const setIsRecording = (val: boolean) => setGuestStates(prev => ({...prev, [id]: { ...prev[id], isRecording: val }}));
-        const setSamples = (updater: (prev: CustomAudioSample[]) => CustomAudioSample[]) => {
-            setGuestHosts(prev => prev.map(g => g.id === id ? { ...g, customSamples: updater(g.customSamples) } : g));
+        if (!guest) return;
+        samples = guest.customSamples;
+        isRecording = guestStates[id]?.isRecording || false;
+        setIsRecording = (val) => setGuestStates(p => ({...p, [id]: {...p[id], isRecording: val}}));
+    }
+    
+    if (samples.length >= 5) {
+      setError("You can add a maximum of 5 audio samples.");
+      return;
+    }
+
+    if (isRecording) {
+      mediaRecorderRef.current?.stop(); setIsRecording(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        mediaRecorderRef.current = mediaRecorder; audioChunksRef.current = [];
+        mediaRecorder.ondataavailable = (event) => audioChunksRef.current.push(event.data);
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          try {
+            const { base64, mimeType } = await import('./utils/audioUtils').then(m => m.processAudioForCloning(audioBlob));
+            const url = `data:${mimeType};base64,${base64}`;
+            const customAudio: CustomAudioSample = { url, base64, mimeType, name: `Recording ${new Date().toLocaleTimeString()}` };
+            if (id === 'samantha') setSamanthaCustomSamples(prev => [...prev, customAudio]);
+            else if (id === 'steward') setStewardCustomSamples(prev => [...prev, customAudio]);
+            else handleUpdateGuestSamples(id, [...samples, customAudio]);
+          } catch(e: any) {
+             setError(e.message || "Failed to process recording.");
+          } finally {
+            stream.getTracks().forEach(track => track.stop());
+          }
         };
-        guestState.isRecording ? stopRecording(setIsRecording) : startRecording(setIsRecording, setSamples);
+        mediaRecorder.start(); setIsRecording(true);
+      } catch (e) { setError("Could not access microphone."); }
     }
   };
   
   const handleAudioFileChange = async (event: React.ChangeEvent<HTMLInputElement>, id: string) => {
     const file = event.target.files?.[0];
     if (file) {
-        const processFile = async (setSamples: (updater: (prev: CustomAudioSample[]) => CustomAudioSample[]) => void) => {
-            setError('');
-            try {
-                const { base64, mimeType } = await import('./utils/audioUtils').then(m => m.processAudioForCloning(file));
-                const url = `data:${mimeType};base64,${base64}`;
-                const customAudio: CustomAudioSample = { url, base64, mimeType, name: file.name };
-                setSamples(prev => [...prev, customAudio]);
-            } catch (e: any) {
-                setError(e.message || "Failed to read and process audio file.");
-            }
-        };
+      let samples: CustomAudioSample[];
+      if (id === 'samantha') samples = samanthaCustomSamples;
+      else if (id === 'steward') samples = stewardCustomSamples;
+      else {
+        const guest = guestHosts.find(g => g.id === id);
+        if (!guest) return;
+        samples = guest.customSamples;
+      }
+      
+      if (samples.length >= 5) {
+        setError("You can add a maximum of 5 audio samples.");
+        return;
+      }
 
-        if (id === 'samantha') {
-            if (samanthaCustomSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
-            await processFile(setSamanthaCustomSamples);
-        } else if (id === 'steward') {
-            if (stewardCustomSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
-            await processFile(setStewardCustomSamples);
-        } else {
-            const guest = guestHosts.find(g => g.id === id);
-            if (!guest) return;
-            if (guest.customSamples.length >= 5) { setError("You can add a maximum of 5 audio samples."); return; }
-            const setSamples = (updater: (prev: CustomAudioSample[]) => CustomAudioSample[]) => {
-                setGuestHosts(prev => prev.map(g => g.id === id ? { ...g, customSamples: updater(g.customSamples) } : g));
-            };
-            await processFile(setSamples);
-        }
+      setError('');
+      try {
+        const { base64, mimeType } = await import('./utils/audioUtils').then(m => m.processAudioForCloning(file));
+        const url = `data:${mimeType};base64,${base64}`;
+        const customAudio: CustomAudioSample = { url, base64, mimeType, name: file.name };
+        if (id === 'samantha') setSamanthaCustomSamples(prev => [...prev, customAudio]);
+        else if (id === 'steward') setStewardCustomSamples(prev => [...prev, customAudio]);
+        else handleUpdateGuestSamples(id, [...samples, customAudio]);
+      } catch (e: any) { setError(e.message || "Failed to read and process audio file."); }
     }
     if (event.target) { event.target.value = ''; }
   };
@@ -1446,46 +1508,31 @@ export default function App() {
     if (id === 'samantha') setSamanthaCustomSamples(prev => prev.filter((_, i) => i !== index));
     else if (id === 'steward') setStewardCustomSamples(prev => prev.filter((_, i) => i !== index));
     else {
-        setGuestHosts(prev => prev.map(g => g.id === id ? {...g, customSamples: g.customSamples.filter((_, i) => i !== index)} : g));
+        const guest = guestHosts.find(g => g.id === id);
+        if(guest) {
+            const updatedSamples = guest.customSamples.filter((_, i) => i !== index);
+            handleUpdateGuestSamples(id, updatedSamples);
+        }
     }
   };
 
-  const handleSaveOrUpdateEpisode = useCallback(async () => {
+  const handleSaveOrUpdateEpisode = () => {
     if (!episodeTitle.trim() || episodeNumber <= 0) { setError("Episode Title and Number are required to save."); return; }
-    
-    // Create a version of the episode data that is safe for storage (no large data).
-    const getStorableEpisodeData = (fullAudioData: string | null): Episode => ({
-        id: loadedEpisodeId || `ep_${Date.now()}`, title: episodeTitle, episodeNumber,
-        samanthaName, stewardName, samanthaVoice, stewardVoice,
-        samanthaCustomSamples: samanthaCustomSamples.map(s => ({...s, base64: ''})), // Clear large data
-        stewardCustomSamples: stewardCustomSamples.map(s => ({...s, base64: ''})),
-        guestHosts: guestHosts.map(g => ({...g, customSamples: g.customSamples.map(s => ({...s, base64: ''}))})),
-        prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength,
-        script, scriptTimings, brandedName, contactDetails, website, slogan, 
-        backgroundSound, backgroundVolume, audioData: fullAudioData, // Include audio only if needed
+    const episodeData: Omit<Episode, 'id' | 'title' | 'episodeNumber'> = {
+        samanthaName, stewardName, samanthaVoice, samanthaCustomSamples, stewardVoice, stewardCustomSamples, guestHosts,
+        prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength, aiProvider,
+        script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound, backgroundVolume, audioData,
         adText, adScript
-    });
-
-    try {
-        if (directoryHandle) {
-            const episodeForFile: Episode = getStorableEpisodeData(audioData); // Save with full audio data
-            const fileName = `${episodeForFile.id}.json`;
-            await writeFile(fileName, episodeForFile);
-        } else {
-            const episodeForStorage: Episode = getStorableEpisodeData(null); // Save with NO audio data
-            const existingEpisodes = episodes.filter(ep => ep.id !== episodeForStorage.id);
-            const updatedEpisodes = [...existingEpisodes, episodeForStorage];
-            localStorage.setItem('podcastEpisodes', JSON.stringify(updatedEpisodes));
-        }
-
-        await loadAllEpisodes();
-        if (!loadedEpisodeId) setLoadedEpisodeId(`ep_${Date.now()}`);
-        setError('');
-    } catch (e: any) {
-        setError(`Failed to save episode: ${e.message}`);
+    };
+    if (loadedEpisodeId) {
+        setEpisodes(prev => prev.map(ep => ep.id === loadedEpisodeId ? { ...ep, ...episodeData, title: episodeTitle, episodeNumber } : ep));
+    } else {
+        const newId = `ep_${Date.now()}`;
+        setEpisodes(prev => [...prev, { ...episodeData, id: newId, title: episodeTitle, episodeNumber }]);
+        setLoadedEpisodeId(newId);
     }
-  }, [episodeTitle, episodeNumber, loadedEpisodeId, samanthaName, stewardName, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, guestHosts, prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength, script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound, backgroundVolume, audioData, adText, adScript, directoryHandle, writeFile, episodes, loadAllEpisodes]);
-  
+    setError('');
+  };
   
   const handleLoadEpisode = (id: string) => {
     if (!id) return;
@@ -1494,82 +1541,58 @@ export default function App() {
     setSamanthaName(ep.samanthaName); setStewardName(ep.stewardName);
     setSamanthaVoice(ep.samanthaVoice); setSamanthaCustomSamples(ep.samanthaCustomSamples || []);
     setStewardVoice(ep.stewardVoice); setStewardCustomSamples(ep.stewardCustomSamples || []);
-    
-    // Load guests
-    const loadedGuests = ep.guestHosts || [];
-    setGuestHosts(loadedGuests);
-    const newGuestStates = {};
-    const newGuestRefs = {};
-    loadedGuests.forEach(g => {
-        newGuestStates[g.id] = { isRecording: false, isPreviewing: false, isPreviewingCustom: false };
-        newGuestRefs[g.id] = React.createRef<HTMLInputElement>();
-    });
-    setGuestStates(newGuestStates);
-    guestAudioFileInputRefs.current = newGuestRefs;
-
+    setGuestHosts(ep.guestHosts || []);
     setPrompt(ep.prompt); setPdfText(ep.pdfText); setFileName(ep.fileName);
     setManualScriptText(ep.manualScriptText); setCustomRules(ep.customRules); setLanguage(ep.language); setEpisodeLength(ep.episodeLength || 10);
+    setAiProvider(ep.aiProvider || 'gemini');
     setScript(ep.script); setScriptTimings(ep.scriptTimings); setBrandedName(ep.brandedName);
     setContactDetails(ep.contactDetails); setWebsite(ep.website); setSlogan(ep.slogan);
-    setAudioData(ep.audioData); setEpisodeTitle(ep.title); setEpisodeNumber(ep.episodeNumber);
     setBackgroundSound(ep.backgroundSound || 'none'); setBackgroundVolume(ep.backgroundVolume ?? 0.1);
+    setAudioData(ep.audioData); setEpisodeTitle(ep.title); setEpisodeNumber(ep.episodeNumber);
     setLoadedEpisodeId(ep.id);
     setAdText(ep.adText || null); setAdScript(ep.adScript || null);
     if (ep.audioData) setCurrentStep(4);
     else if (ep.script) setCurrentStep(3);
-    else setCurrentStep(2);
+    else setCurrentStep(1);
     setError('');
   };
 
-  const areHostsValid = () => {
-    const mainHostsValid = samanthaName.trim() !== '' && stewardName.trim() !== '';
-    const guestsValid = guestHosts.every(g => g.name.trim() !== '' && g.role.trim() !== '');
-    return mainHostsValid && guestsValid;
-  };
+  const areContentInputsValid = () => !!(prompt || pdfText || manualScriptText);
+  const areHostsValid = () => samanthaName.trim() !== '' && stewardName.trim() !== '' && guestHosts.every(g => g.name.trim() !== '' && g.role.trim() !== '');
 
   const handleAddGuest = () => {
-      const newId = `guest_${Date.now()}`;
-      guestAudioFileInputRefs.current[newId] = React.createRef<HTMLInputElement>();
-      setGuestHosts(prev => [...prev, { id: newId, name: '', role: '', gender: 'male', voice: 'Zephyr', customSamples: [] }]);
-      setGuestStates(prev => ({ ...prev, [newId]: { isRecording: false, isPreviewing: false, isPreviewingCustom: false } }));
+    const newGuestId = `guest_${Date.now()}`;
+    guestAudioFileInputRefs.current[newGuestId] = React.createRef();
+    setGuestHosts(prev => [...prev, {
+        id: newGuestId, name: '', role: '', gender: 'male', voice: 'Zephyr', customSamples: []
+    }]);
+    setGuestStates(prev => ({ ...prev, [newGuestId]: { isRecording: false, isPreviewing: false, isPreviewingCustom: false } }));
   };
 
   const handleRemoveGuest = (id: string) => {
-      setGuestHosts(prev => prev.filter(g => g.id !== id));
-      setGuestStates(prev => {
-          const newStates = {...prev};
-          delete newStates[id];
-          return newStates;
-      });
-      delete guestAudioFileInputRefs.current[id];
+    setGuestHosts(prev => prev.filter(g => g.id !== id));
+    setGuestStates(prev => {
+        const next = {...prev};
+        delete next[id];
+        return next;
+    });
   };
 
-  const handleUpdateGuest = (id: string, field: keyof Omit<GuestHost, 'id' | 'customSamples'>, value: any) => {
-      setGuestHosts(prev => prev.map(g => {
-          if (g.id === id) {
-              const updatedGuest = { ...g, [field]: value };
-              if (field === 'gender') {
-                  const isFemale = value === 'female';
-                  const currentVoiceIsFemale = femaleVoices.some(v => v.name === updatedGuest.voice);
-                  const currentVoiceIsMale = maleVoices.some(v => v.name === updatedGuest.voice);
-                  if (isFemale && !currentVoiceIsFemale) {
-                      updatedGuest.voice = 'Kore';
-                  } else if (!isFemale && !currentVoiceIsMale) {
-                      updatedGuest.voice = 'Zephyr';
-                  }
-              }
-              return updatedGuest;
-          }
-          return g;
-      }));
+  const handleUpdateGuest = (id: string, field: keyof Omit<GuestHost, 'id'|'customSamples'>, value: any) => {
+    setGuestHosts(prev => prev.map(g => g.id === id ? { ...g, [field]: value } : g));
   };
+  
+  const handleUpdateGuestSamples = (id: string, samples: CustomAudioSample[]) => {
+      setGuestHosts(prev => prev.map(g => g.id === id ? { ...g, customSamples: samples } : g));
+  };
+
 
   const renderCreatorContent = () => {
     switch(currentStep) {
-      case 1: return <StepHosts error={error} setError={setError} samanthaName={samanthaName} setSamanthaName={setSamanthaName} stewardName={stewardName} setStewardName={setStewardName} samanthaVoice={samanthaVoice} setSamanthaVoice={setSamanthaVoice} stewardVoice={stewardVoice} setStewardVoice={setStewardVoice} isPreviewingSamantha={isPreviewingSamantha} isPreviewingSteward={isPreviewingSteward} handlePreviewVoice={handlePreviewVoice} femaleVoices={femaleVoices} maleVoices={maleVoices} areHostsValid={areHostsValid} setCurrentStep={setCurrentStep} samanthaCustomSamples={samanthaCustomSamples} isPreviewingSamanthaCustom={isPreviewingSamanthaCustom} isRecordingSamantha={isRecordingSamantha} samanthaAudioFileInputRef={samanthaAudioFileInputRef} stewardCustomSamples={stewardCustomSamples} isPreviewingStewardCustom={isPreviewingStewardCustom} isRecordingSteward={isRecordingSteward} stewardAudioFileInputRef={stewardAudioFileInputRef} handlePreviewCustomVoice={handlePreviewCustomVoice} handleRemoveCustomAudio={handleRemoveCustomAudio} handleToggleRecording={handleToggleRecording} handleAudioFileChange={handleAudioFileChange} isPreviewingQuality={isPreviewingQuality} handlePreviewQuality={handlePreviewQuality} guestHosts={guestHosts} handleAddGuest={handleAddGuest} handleRemoveGuest={handleRemoveGuest} handleUpdateGuest={handleUpdateGuest} guestStates={guestStates} guestAudioFileInputRefs={guestAudioFileInputRefs} />;
-      case 2: return <StepContent error={error} episodeTitle={episodeTitle} setEpisodeTitle={setEpisodeTitle} episodeNumber={episodeNumber} setEpisodeNumber={setEpisodeNumber} episodeLength={episodeLength} setEpisodeLength={setEpisodeLength} language={language} setLanguage={setLanguage} prompt={prompt} setPrompt={setPrompt} fileName={fileName} fileInputRef={fileInputRef} handleFileChange={handleFileChange} samanthaName={samanthaName} stewardName={stewardName} manualScriptText={manualScriptText} setManualScriptText={setManualScriptText} customRules={customRules} setCustomRules={setCustomRules} setCurrentStep={setCurrentStep} handleGenerateScript={handleGenerateScript} isLoadingScript={isLoadingScript} areContentInputsValid={() => !!(prompt || pdfText || manualScriptText)} />;
-      case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} backgroundSound={backgroundSound} setBackgroundSound={setBackgroundSound} backgroundVolume={backgroundVolume} setBackgroundVolume={setBackgroundVolume} />;
-      case 4: return script && audioData && scriptTimings ? <StepStudio audioData={audioData} setAudioData={setAudioData} script={script} scriptTimings={scriptTimings} handleDownloadAudio={handleDownloadAudio} handleStartOver={handleStartOver} handleSaveOrUpdateEpisode={handleSaveOrUpdateEpisode} loadedEpisodeId={loadedEpisodeId} areTimingsStale={areTimingsStale} setAreTimingsStale={setAreTimingsStale} adText={adText} setAdText={setAdText} adScript={adScript} setAdScript={setAdScript} episodeTitle={episodeTitle} brandedName={brandedName}/> : <div>Loading...</div>;
+      case 1: return <StepHosts error={error} setError={setError} samanthaName={samanthaName} setSamanthaName={setSamanthaName} stewardName={stewardName} setStewardName={setStewardName} samanthaVoice={samanthaVoice} setSamanthaVoice={setSamanthaVoice} stewardVoice={stewardVoice} setStewardVoice={setStewardVoice} isPreviewingSamantha={isPreviewingSamantha} isPreviewingSteward={isPreviewingSteward} handlePreviewVoice={handlePreviewVoice} femaleVoices={femaleVoices} maleVoices={maleVoices} areHostsValid={areHostsValid} setCurrentStep={setCurrentStep} samanthaCustomSamples={samanthaCustomSamples} isPreviewingSamanthaCustom={isPreviewingSamanthaCustom} isRecordingSamantha={isRecordingSamantha} samanthaAudioFileInputRef={samanthaAudioFileInputRef} stewardCustomSamples={stewardCustomSamples} isPreviewingStewardCustom={isPreviewingStewardCustom} isRecordingSteward={isRecordingSteward} stewardAudioFileInputRef={stewardAudioFileInputRef} handlePreviewCustomVoice={handlePreviewCustomVoice} handleRemoveCustomAudio={handleRemoveCustomAudio} handleToggleRecording={handleToggleRecording} handleAudioFileChange={handleAudioFileChange} isPreviewingQuality={isPreviewingQuality} handlePreviewQuality={handlePreviewQuality} hasRequiredApiKey={hasRequiredApiKey} aiProvider={aiProvider} guestHosts={guestHosts} handleAddGuest={handleAddGuest} handleRemoveGuest={handleRemoveGuest} handleUpdateGuest={handleUpdateGuest} guestStates={guestStates} guestAudioFileInputRefs={guestAudioFileInputRefs} handleUpdateGuestSamples={handleUpdateGuestSamples} />;
+      case 2: return <StepContent error={error} episodeTitle={episodeTitle} setEpisodeTitle={setEpisodeTitle} episodeNumber={episodeNumber} setEpisodeNumber={setEpisodeNumber} episodeLength={episodeLength} setEpisodeLength={setEpisodeLength} language={language} setLanguage={setLanguage} prompt={prompt} setPrompt={setPrompt} fileName={fileName} fileInputRef={fileInputRef} handleFileChange={handleFileChange} samanthaName={samanthaName} stewardName={stewardName} manualScriptText={manualScriptText} setManualScriptText={setManualScriptText} customRules={customRules} setCustomRules={setCustomRules} setCurrentStep={setCurrentStep} handleGenerateScript={handleGenerateScript} isLoadingScript={isLoadingScript} areContentInputsValid={areContentInputsValid} hasRequiredApiKey={hasRequiredApiKey} aiProvider={aiProvider} setAiProvider={setAiProvider} />;
+      case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} hasRequiredApiKey={hasRequiredApiKey} aiProvider={aiProvider} setAiProvider={setAiProvider} backgroundSound={backgroundSound} setBackgroundSound={setBackgroundSound} backgroundVolume={backgroundVolume} setBackgroundVolume={setBackgroundVolume} />;
+      case 4: return script && audioData && scriptTimings ? <StepStudio audioData={audioData} setAudioData={setAudioData} script={script} scriptTimings={scriptTimings} handleDownloadAudio={handleDownloadAudio} handleStartOver={handleStartOver} handleSaveOrUpdateEpisode={handleSaveOrUpdateEpisode} loadedEpisodeId={loadedEpisodeId} areTimingsStale={areTimingsStale} setAreTimingsStale={setAreTimingsStale} adText={adText} setAdText={setAdText} adScript={adScript} setAdScript={setAdScript} episodeTitle={episodeTitle} brandedName={brandedName} hasRequiredApiKey={hasRequiredApiKey}/> : <div>Loading...</div>;
       default: return <div />;
     }
   }
@@ -1583,7 +1606,6 @@ export default function App() {
             <p className="text-lg text-text-secondary">Craft, edit, and produce professional podcasts with AI.</p>
         </header>
         
-        {/* Main Tab Navigation */}
         <div className="w-full mb-12">
             <h2 className="text-center text-2xl font-serif font-bold text-gold mb-4 tracking-wider">Select Your Workspace</h2>
             <div className="w-full border-b border-zinc-800 flex justify-center">
@@ -1620,7 +1642,7 @@ export default function App() {
         )}
         
         {activeTab === 'editor' && <AudioEditorTab />}
-        {activeTab === 'settings' && <SettingsTab apiKeys={userApiKeys} setApiKeys={setUserApiKeys} directoryHandle={directoryHandle} connectFolder={connectFolder} disconnectFolder={disconnectFolder} isFileSystemSupported={isSupported} />}
+        {activeTab === 'settings' && <SettingsTab apiKeys={apiKeys} onKeysUpdated={handleKeysUpdated} />}
         {activeTab === 'about' && <AboutTab />}
 
       </div>
@@ -1647,16 +1669,20 @@ const TabButton: React.FC<{ name: string; icon: React.ReactNode; isActive: boole
 const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: string, onStartOver: () => void }) => {
     const [audioData, setAudioData] = useState<string>(initialAudioData);
     const [audioHistory, setAudioHistory] = useState<string[]>([]);
+
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [volume, setVolume] = useState(1);
     const audioRef = useRef<HTMLAudioElement>(null);
+
     const waveformRef = useRef<HTMLCanvasElement>(null);
     const waveformContainerRef = useRef<HTMLDivElement>(null);
     const [selection, setSelection] = useState<{ start: number, end: number} | null>(null);
     const isDraggingRef = useRef(false);
+    const [isTouch, setIsTouch] = useState(false);
     const [zoom, setZoom] = useState(1);
+
 
     const formatTime = (time: number) => {
         const minutes = Math.floor(time / 60);
@@ -1669,100 +1695,70 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
             const rawData = decode(audioData);
             const wavBlob = pcmToWav(rawData, 24000, 1, 16);
             const url = URL.createObjectURL(wavBlob);
-            const currentAudio = audioRef.current;
-            currentAudio.src = url;
+            audioRef.current.src = url;
             return () => URL.revokeObjectURL(url);
         }
     }, [audioData]);
 
-    const drawWaveform = useCallback((pcmData: Int16Array) => {
+    const drawWaveform = useCallback((normalizedData: number[]) => {
         const canvas = waveformRef.current;
-        const container = waveformContainerRef.current;
-        if (!canvas || !container) return;
-
+        if (!canvas) return;
         const dpr = window.devicePixelRatio || 1;
-        const rect = container.getBoundingClientRect();
+        const rect = canvas.getBoundingClientRect();
         canvas.width = rect.width * dpr;
         canvas.height = rect.height * dpr;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         ctx.scale(dpr, dpr);
-
-        const width = rect.width;
-        const height = rect.height;
+        
+        const width = canvas.width / dpr;
+        const height = canvas.height / dpr;
         const centerY = height / 2;
         
         ctx.clearRect(0, 0, width, height);
 
-        const samplesPerPixel = Math.floor(pcmData.length / (width * zoom));
-        const barWidth = Math.max(1, width / (pcmData.length / samplesPerPixel));
-
-        const gradient = ctx.createLinearGradient(0, 0, 0, height);
-        gradient.addColorStop(0, '#EC4899'); // Pink/Magenta
-        gradient.addColorStop(0.5, '#8B5CF6'); // Purple
-        gradient.addColorStop(1, '#3B82F6');   // Blue
-
-        const playheadX = duration > 0 ? (currentTime / duration) * width * zoom : 0;
-        const scrollOffset = container.scrollLeft;
-        
-        // Draw full waveform
-        for (let x = 0; x < width * zoom; x += barWidth) {
-            const startIndex = Math.floor(x * samplesPerPixel);
-            let min = 0;
-            let max = 0;
-            for (let j = 0; j < samplesPerPixel; j++) {
-                const sample = pcmData[startIndex + j] / 32768.0;
-                if (sample < min) min = sample;
-                if (sample > max) max = sample;
-            }
-            const barHeight = (max - min) * centerY;
-            ctx.fillStyle = gradient;
-            ctx.fillRect(x, centerY - max * centerY, barWidth, barHeight);
+        ctx.strokeStyle = '#a1a1aa';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        for(let i = 0; i < normalizedData.length; i++) {
+            const x = (i / normalizedData.length) * width;
+            const y = normalizedData[i] * centerY + centerY;
+            ctx.lineTo(x, y);
         }
+        ctx.stroke();
         
-        // Draw selection
+        const progressX = duration > 0 ? (currentTime / duration) * width : 0;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, progressX, height);
+        ctx.clip();
+        
+        ctx.strokeStyle = '#ECB365';
+        ctx.beginPath();
+        ctx.moveTo(0, centerY);
+        for(let i = 0; i < normalizedData.length; i++) {
+            const x = (i / normalizedData.length) * width;
+            const y = normalizedData[i] * centerY + centerY;
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.restore();
+
         if (selection) {
             ctx.fillStyle = 'rgba(225, 29, 72, 0.3)';
-            const startX = (selection.start / duration) * width * zoom;
-            const endX = (selection.end / duration) * width * zoom;
+            const startX = (selection.start / duration) * width;
+            const endX = (selection.end / duration) * width;
             ctx.fillRect(startX, 0, endX - startX, height);
         }
-
-        // Draw playhead
-        if (playheadX >= scrollOffset && playheadX <= scrollOffset + width) {
-            ctx.strokeStyle = '#f4f4f5'; // text-primary
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(playheadX, 0);
-            ctx.lineTo(playheadX, height);
-            ctx.stroke();
-        }
-
-    }, [currentTime, duration, selection, zoom]);
+    }, [currentTime, duration, selection]);
     
-    useEffect(() => {
-        if (!audioData) return;
-        const rawData = decode(audioData);
-        const pcm = new Int16Array(rawData.buffer, rawData.byteOffset, rawData.length / 2);
-        drawWaveform(pcm);
-    }, [audioData, drawWaveform, currentTime, selection, zoom, duration]);
-
     useEffect(() => {
       const audio = audioRef.current;
       if (!audio) return;
       
-      const handleLoadedMetadata = () => { if (isFinite(audio.duration)) setDuration(audio.duration); };
-      const handleTimeUpdate = () => {
-          setCurrentTime(audio.currentTime);
-          const container = waveformContainerRef.current;
-          if (container && audio.duration > 0) {
-              const playheadX = (audio.currentTime / audio.duration) * container.scrollWidth;
-              // Auto-scroll logic
-              if (playheadX < container.scrollLeft || playheadX > container.scrollLeft + container.clientWidth) {
-                  container.scrollLeft = playheadX - container.clientWidth / 2;
-              }
-          }
-      };
+      const handleLoadedMetadata = () => { if (isFinite(audio.duration)) setDuration(audio.duration); setCurrentTime(audio.currentTime); };
+      const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
       const handlePlay = () => setIsPlaying(true);
       const handlePause = () => setIsPlaying(false);
 
@@ -1779,8 +1775,37 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
           audio.removeEventListener('pause', handlePause);
           audio.removeEventListener('ended', handlePause);
       };
-    }, []);
-    
+    }, [audioRef]);
+
+
+    useEffect(() => {
+        if (!audioData) return;
+        
+        const rawData = decode(audioData);
+        const pcm = new Int16Array(rawData.buffer);
+        const channelData = new Float32Array(pcm.length);
+        for (let i = 0; i < pcm.length; i++) {
+            channelData[i] = pcm[i] / 32768.0;
+        }
+
+        const samples = Math.floor(400 * zoom);
+        const blockSize = Math.floor(channelData.length / samples);
+        const filteredData = [];
+        for (let i = 0; i < samples; i++) {
+            let sum = 0;
+            for (let j = 0; j < blockSize; j++) {
+                sum = sum + Math.abs(channelData[blockSize * i + j]);
+            }
+            filteredData.push(sum / blockSize);
+        }
+
+        const multiplier = Math.pow(Math.max(...filteredData), -1) || 1;
+        const normalizedData = filteredData.map(n => n * multiplier * 2 - 1);
+        
+        drawWaveform(normalizedData);
+        
+    }, [audioData, drawWaveform, currentTime, selection, zoom]);
+
     const handleWaveformInteraction = useCallback((clientX: number, type: 'down' | 'move' | 'up') => {
         const container = waveformContainerRef.current;
         if (!container || duration === 0) return;
@@ -1788,110 +1813,106 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         const rect = container.getBoundingClientRect();
         const scrollLeft = container.scrollLeft;
         const totalWidth = container.scrollWidth;
-        const absoluteX = clientX - rect.left + scrollLeft;
+
+        const relativeX = clientX - rect.left;
+        const absoluteX = relativeX + scrollLeft;
         
         const time = Math.max(0, Math.min((absoluteX / totalWidth) * duration, duration));
 
         if (type === 'down') {
             isDraggingRef.current = true;
             setSelection({ start: time, end: time });
-        } else if (type === 'move' && isDraggingRef.current) {
-            setSelection(s => s ? { ...s, end: time } : null);
+        } else if (type === 'move' && isDraggingRef.current && selection) {
+            setSelection({ ...selection, end: time });
         } else if (type === 'up') {
             isDraggingRef.current = false;
-            setSelection(s => {
-                if (s && s.start > s.end) return { start: s.end, end: s.start };
-                return s;
-            });
+            if (selection && selection.start > selection.end) {
+                setSelection({ start: selection.end, end: selection.start });
+            }
         }
-    }, [duration]);
-    
+    }, [duration, selection]);
 
     const togglePlayPause = async () => {
-        const audio = audioRef.current;
-        if (!audio) return;
+        if (!audioRef.current) return;
         try {
-            if (audio.paused) await audio.play();
-            else audio.pause();
+            if (audioRef.current.paused) {
+                await audioRef.current.play();
+            } else {
+                audioRef.current.pause();
+            }
         } catch (error: any) {
-            if (error.name !== 'AbortError') console.error("Error playing/pausing audio:", error);
+            if (error.name !== 'AbortError') {
+                console.error("Error playing/pausing audio:", error);
+            }
         }
     };
     
     const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newVolume = parseFloat(e.target.value);
         setVolume(newVolume);
-        if (audioRef.current) audioRef.current.volume = newVolume;
+        if (audioRef.current) {
+            audioRef.current.volume = newVolume;
+        }
     };
 
     const handleSeek = (time: number) => {
-        if (audioRef.current) audioRef.current.currentTime = time;
+        if (audioRef.current) {
+            audioRef.current.currentTime = time;
+            setCurrentTime(time);
+        }
     };
 
-    const handleApplyEffect = (type: 'normalize' | 'gain' | 'noiseGate' | 'cut' | 'trim' | 'silence' | 'fadeIn' | 'fadeOut') => {
+    const handleAudioEdit = (type: 'cut' | 'trim' | 'silence' | 'fadeIn' | 'fadeOut') => {
         if (!selection || !audioData) return;
-        
-        let value: any;
-        if (type === 'gain') {
-            const gainDb = parseFloat(window.prompt('Enter gain in dB (e.g., 3 for louder, -6 for quieter)', '3') || '0');
-            if (isNaN(gainDb)) return;
-            value = Math.pow(10, gainDb / 20); // Convert dB to linear amplitude
-        }
-        if (type === 'noiseGate') {
-            const threshold = parseFloat(window.prompt('Enter noise gate threshold (a value from 0.0 to 1.0)', '0.05') || '0');
-            if (isNaN(threshold) || threshold < 0 || threshold > 1) return;
-            value = threshold;
-        }
-
         setAudioHistory(prev => [...prev, audioData]);
         
         const pcmData = decode(audioData);
+        const bytesPerSample = 2;
         const sampleRate = 24000;
-        const bytesPerSample = 2; // 16-bit
         
         let startByte = Math.floor(selection.start * sampleRate * bytesPerSample);
         let endByte = Math.floor(selection.end * sampleRate * bytesPerSample);
         startByte -= startByte % 2;
         endByte -= endByte % 2;
 
+        let newData;
         const part1 = pcmData.slice(0, startByte);
         const selectedPart = pcmData.slice(startByte, endByte);
         const part2 = pcmData.slice(endByte);
 
-        let modifiedPart;
         switch(type) {
             case 'cut':
-                modifiedPart = new Uint8Array(0); break;
+                newData = concatenatePcm([part1, part2]);
+                break;
             case 'trim':
-                setAudioData(encode(selectedPart)); setSelection(null); return;
+                newData = selectedPart;
+                break;
             case 'silence':
-                modifiedPart = generateSilence(selection.end - selection.start, sampleRate, 16); break;
+                const silenceDuration = selection.end - selection.start;
+                const silence = generateSilence(silenceDuration, sampleRate, 16);
+                newData = concatenatePcm([part1, silence, part2]);
+                break;
             case 'fadeIn':
-                modifiedPart = applyFade(selectedPart, 'in'); break;
+                const fadedInPart = applyFade(selectedPart, 'in');
+                newData = concatenatePcm([part1, fadedInPart, part2]);
+                break;
             case 'fadeOut':
-                modifiedPart = applyFade(selectedPart, 'out'); break;
-            case 'normalize':
-                modifiedPart = normalize(selectedPart, 0.98); break;
-            case 'gain':
-                modifiedPart = applyGain(selectedPart, value); break;
-            case 'noiseGate':
-                modifiedPart = applyNoiseGate(selectedPart, value); break;
+                const fadedOutPart = applyFade(selectedPart, 'out');
+                newData = concatenatePcm([part1, fadedOutPart, part2]);
+                break;
             default:
-                modifiedPart = selectedPart;
+                newData = pcmData;
         }
 
-        const newData = concatenatePcm([part1, modifiedPart, part2]);
         setAudioData(encode(newData));
         setSelection(null);
     };
 
     const handleUndo = () => {
         if (audioHistory.length > 0) {
-            const lastState = audioHistory.pop();
-            if (lastState) {
-                setAudioData(lastState);
-                setAudioHistory([...audioHistory]);
-            }
+            const lastState = audioHistory[audioHistory.length - 1];
+            setAudioData(lastState);
+            setAudioHistory(prev => prev.slice(0, -1));
         }
     };
     
@@ -1909,13 +1930,6 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
         URL.revokeObjectURL(url);
     };
 
-    const ToolButton: React.FC<{onClick: () => void, disabled: boolean, children: React.ReactNode, title: string}> = ({ onClick, disabled, children, title }) => (
-      <button onClick={onClick} disabled={disabled} title={title} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-        {children}
-        <span className="text-sm font-semibold">{title}</span>
-      </button>
-    );
-
     return (
       <div className="max-w-4xl mx-auto text-center py-12 fade-in">
         <Card title="Audio Editor" icon={<EditIcon />}>
@@ -1929,56 +1943,74 @@ const AudioEditor = ({ initialAudioData, onStartOver }: { initialAudioData: stri
             </div>
             
             <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl space-y-4">
-                 <div 
-                    ref={waveformContainerRef} 
-                    className="w-full h-32 md:h-40 bg-zinc-800/20 rounded-lg overflow-x-auto"
-                    onMouseDown={(e) => handleWaveformInteraction(e.clientX, 'down')}
-                    onMouseMove={(e) => handleWaveformInteraction(e.clientX, 'move')}
-                    onMouseUp={() => handleWaveformInteraction(0, 'up')}
-                    onMouseLeave={() => isDraggingRef.current && handleWaveformInteraction(0, 'up')}
-                >
+                 <div className="flex items-center gap-4 p-2 bg-zinc-800/50 rounded-lg">
+                    <ZoomOutIcon />
+                    <input 
+                        type="range" 
+                        min="1" 
+                        max="20" 
+                        step="1"
+                        value={zoom} 
+                        onChange={(e) => setZoom(parseFloat(e.target.value))}
+                        className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold"
+                        aria-label="Zoom waveform"
+                    />
+                    <ZoomInIcon />
+                </div>
+                <div ref={waveformContainerRef} className="w-full overflow-x-auto">
                     <canvas 
                         ref={waveformRef} 
-                        className="h-full cursor-text"
+                        className="h-24 md:h-32 cursor-text touch-none"
                         style={{ width: `${zoom * 100}%` }}
-                    />
-                </div>
-                <div className="flex items-center gap-4 p-2 bg-zinc-800/50 rounded-lg">
-                    <ZoomOutIcon />
-                    <input type="range" min="1" max="50" step="1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" aria-label="Zoom waveform"/>
-                    <ZoomInIcon />
+                        onMouseDown={(e) => { setIsTouch(false); handleWaveformInteraction(e.clientX, 'down'); }} 
+                        onMouseMove={(e) => !isTouch && isDraggingRef.current && handleWaveformInteraction(e.clientX, 'move')} 
+                        onMouseUp={(e) => !isTouch && handleWaveformInteraction(e.clientX, 'up')} 
+                        onMouseLeave={() => { if(!isTouch) isDraggingRef.current = false; }}
+                        onTouchStart={(e) => { setIsTouch(true); handleWaveformInteraction(e.touches[0].clientX, 'down'); }}
+                        onTouchMove={(e) => handleWaveformInteraction(e.touches[0].clientX, 'move')}
+                        onTouchEnd={(e) => handleWaveformInteraction(e.changedTouches[0].clientX, 'up')}
+                    ></canvas>
                 </div>
                 <div className="flex justify-between text-sm text-text-secondary font-mono">
                     <span>{formatTime(currentTime)}</span>
                     <span>{formatTime(duration)}</span>
                 </div>
-                 <div className="flex items-center justify-center gap-6 p-4 bg-zinc-800/50 rounded-lg">
-                    <button onClick={() => handleSeek(Math.max(0, currentTime - 5))} className="p-4 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><RewindIcon /></button>
-                    <button onClick={togglePlayPause} className="p-6 bg-primary text-on-primary rounded-full hover:bg-primary-hover transition transform hover:scale-110 shadow-primary-glow">
+                <div className="flex items-center justify-center gap-4">
+                    <button onClick={() => handleSeek(Math.max(0, currentTime - 5))} className="p-3 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><RewindIcon /></button>
+                    <button onClick={togglePlayPause} className="p-5 bg-primary text-on-primary rounded-full hover:bg-primary-hover transition transform hover:scale-110 shadow-primary-glow">
                         {isPlaying ? <PauseIcon /> : <PlayIcon />}
                     </button>
-                    <button onClick={() => handleSeek(Math.min(duration, currentTime + 5))} className="p-4 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><ForwardIcon /></button>
+                    <button onClick={() => handleSeek(Math.min(duration, currentTime + 5))} className="p-3 bg-zinc-800 rounded-full hover:bg-zinc-700 transition"><ForwardIcon /></button>
                 </div>
                  <div className="flex items-center gap-4 pt-4">
                     <button onClick={() => handleVolumeChange({ target: { value: volume > 0 ? '0' : '1' } } as any)}>{volume > 0 ? <VolumeHighIcon /> : <VolumeMuteIcon />}</button>
-                    <input type="range" min="0" max="1" step="0.01" value={volume} onChange={handleVolumeChange} className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" />
+                    <input type="range" min="0" max="1" step="0.01" value={volume} onChange={handleVolumeChange} className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-gold" />
                 </div>
             </div>
 
             <div className="pt-8 mt-8 border-t border-zinc-800">
                 <h3 className="text-xl font-serif font-bold text-text-primary mb-6">Editing Tools</h3>
                 {selection && <p className="text-sm text-center text-text-secondary font-mono mb-4">Selection: {formatTime(selection.start)} to {formatTime(selection.end)} ({formatTime(selection.end - selection.start)})</p>}
-                
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 text-center">
-                    <ToolButton onClick={handleUndo} disabled={audioHistory.length === 0} title="Undo"><RestartIcon /></ToolButton>
-                    <ToolButton onClick={() => handleApplyEffect('cut')} disabled={!selection} title="Cut"><CutIcon /></ToolButton>
-                    <ToolButton onClick={() => handleApplyEffect('trim')} disabled={!selection} title="Trim"><TrimIcon /></ToolButton>
-                    <ToolButton onClick={() => handleApplyEffect('silence')} disabled={!selection} title="Silence"><SilenceIcon /></ToolButton>
-                    <ToolButton onClick={() => handleApplyEffect('fadeIn')} disabled={!selection} title="Fade In"><FadeInIcon /></ToolButton>
-                    <ToolButton onClick={() => handleApplyEffect('fadeOut')} disabled={!selection} title="Fade Out"><FadeInIcon className="transform -scale-x-100"/></ToolButton>
-                    <ToolButton onClick={() => handleApplyEffect('normalize')} disabled={!selection} title="Normalize"><NormalizeIcon /></ToolButton>
-                    <ToolButton onClick={() => handleApplyEffect('gain')} disabled={!selection} title="Gain"><GainIcon /></ToolButton>
-                    <ToolButton onClick={() => handleApplyEffect('noiseGate')} disabled={!selection} title="Noise Gate"><NoiseGateIcon /></ToolButton>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 text-center">
+                    <button onClick={handleUndo} disabled={audioHistory.length === 0} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <RestartIcon /> <span className="text-sm font-semibold">Undo</span>
+                    </button>
+                    <button onClick={() => handleAudioEdit('cut')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <CutIcon /> <span className="text-sm font-semibold">Cut</span>
+                    </button>
+                     <button onClick={() => handleAudioEdit('trim')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <TrimIcon /> <span className="text-sm font-semibold">Trim</span>
+                    </button>
+                    <button onClick={() => handleAudioEdit('silence')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <SilenceIcon /> <span className="text-sm font-semibold">Silence</span>
+                    </button>
+                    <button onClick={() => handleAudioEdit('fadeIn')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <FadeInIcon /> <span className="text-sm font-semibold">Fade In</span>
+                    </button>
+                     <button onClick={() => handleAudioEdit('fadeOut')} disabled={!selection} className="flex flex-col items-center justify-center gap-2 p-4 bg-zinc-800/50 rounded-lg hover:bg-zinc-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <FadeInIcon className="transform -scale-x-100"/> <span className="text-sm font-semibold">Fade Out</span>
+                    </button>
                 </div>
             </div>
             <audio ref={audioRef} className="hidden" />
@@ -2006,7 +2038,7 @@ const AudioEditorTab = () => {
             setError(e.message || 'Failed to process audio file.');
         } finally {
             setIsLoading(false);
-            if (event.target) event.target.value = ''; // Reset file input
+            if (event.target) event.target.value = '';
         }
     };
     
@@ -2050,6 +2082,96 @@ const AudioEditorTab = () => {
     }
     
     return <AudioEditor initialAudioData={audioData} onStartOver={() => setAudioData(null)} />;
+};
+
+const SettingsTab: React.FC<{ apiKeys: ApiKey[], onKeysUpdated: (keys: ApiKey[]) => void }> = ({ apiKeys, onKeysUpdated }) => {
+    const [keyName, setKeyName] = useState('');
+    const [keyValue, setKeyValue] = useState('');
+    const [keyType, setKeyType] = useState<'gemini' | 'huggingface'>('gemini');
+    const [error, setError] = useState('');
+
+    const handleAddKey = () => {
+        if (!keyName.trim() || !keyValue.trim()) {
+            setError('Please provide a name and a value for the key.');
+            return;
+        }
+        const newKey: ApiKey = {
+            id: `key_${Date.now()}`,
+            name: keyName,
+            key: keyValue,
+            type: keyType
+        };
+        onKeysUpdated([...apiKeys, newKey]);
+        setKeyName('');
+        setKeyValue('');
+        setError('');
+    };
+
+    const handleRemoveKey = (id: string) => {
+        onKeysUpdated(apiKeys.filter(k => k.id !== id));
+    };
+
+    return (
+        <div className="max-w-4xl mx-auto py-12 px-4 sm:px-0 fade-in">
+            <Card title="API Key Management" icon={<SettingsIcon />}>
+                 <div className="prose prose-invert text-text-secondary">
+                    <p>Add your API keys here. This app uses the <strong className="text-gold">Google Gemini API</strong> for its advanced features (like voice cloning and interruptions) and the <strong className="text-gold">Hugging Face API</strong> for access to a wide range of open-source models.</p>
+                    <p>You must have the appropriate key for the AI Provider you select in the Creator tab.</p>
+                </div>
+
+                <div className="space-y-6 pt-8 border-t border-zinc-800">
+                    <h3 className="text-xl font-serif font-bold text-text-primary">Add New Key</h3>
+                    {error && <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-sm text-red-300">{error}</div>}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-bold text-text-primary mb-2">Key Name</label>
+                                <input type="text" placeholder="e.g., My Personal Key" value={keyName} onChange={e => setKeyName(e.target.value)} className="w-full text-lg bg-input-background border border-zinc-700 rounded-lg p-3 focus:ring-2 focus:ring-gold focus:border-gold transition"/>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-text-primary mb-2">Key Type</label>
+                                <select value={keyType} onChange={e => setKeyType(e.target.value as any)} className="w-full text-lg bg-input-background border border-zinc-700 rounded-lg p-3 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
+                                    <option value="gemini">Google Gemini</option>
+                                    <option value="huggingface">Hugging Face</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="md:col-span-3">
+                             <label className="block text-sm font-bold text-text-primary mb-2">Key / Token</label>
+                             <input type="password" placeholder="Paste your key here" value={keyValue} onChange={e => setKeyValue(e.target.value)} className="w-full text-lg bg-input-background border border-zinc-700 rounded-lg p-3 focus:ring-2 focus:ring-gold focus:border-gold transition"/>
+                        </div>
+                    </div>
+                     <button onClick={handleAddKey} className="w-full sm:w-auto bg-primary text-on-primary font-bold py-3 px-8 rounded-lg hover:bg-primary-hover transition flex items-center justify-center gap-2 text-lg shadow-primary-glow">
+                        <PlusIcon /> Add Key
+                    </button>
+                </div>
+
+                <div className="space-y-4 pt-8 border-t border-zinc-800">
+                     <h3 className="text-xl font-serif font-bold text-text-primary">Saved Keys</h3>
+                     {apiKeys.length === 0 ? (
+                        <p className="text-text-secondary italic">No keys saved yet.</p>
+                     ) : (
+                        <div className="space-y-3">
+                            {apiKeys.map(apiKey => (
+                                <div key={apiKey.id} className="flex items-center justify-between bg-zinc-900/50 p-4 rounded-lg border border-zinc-800">
+                                    <div className="flex items-center gap-4">
+                                        {apiKey.type === 'gemini' ? <GoogleIcon /> : <HuggingFaceIcon />}
+                                        <div>
+                                            <p className="font-bold text-text-primary">{apiKey.name}</p>
+                                            <p className="text-sm text-text-secondary font-mono">{apiKey.key.substring(0, 4)}...{apiKey.key.slice(-4)}</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => handleRemoveKey(apiKey.id)} className="text-red-400 hover:bg-red-500/20 rounded-full p-2 transition">
+                                        <TrashIcon />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                     )}
+                </div>
+            </Card>
+        </div>
+    )
 };
 
 const AboutTab = () => {
@@ -2112,132 +2234,4 @@ const AboutTab = () => {
             </Card>
         </div>
     )
-};
-
-const SettingsTab: React.FC<{
-    apiKeys: ApiKey[];
-    setApiKeys: (keys: ApiKey[]) => void;
-    directoryHandle: any | null;
-    connectFolder: () => void;
-    disconnectFolder: () => void;
-    isFileSystemSupported: boolean;
-}> = ({ apiKeys, setApiKeys, directoryHandle, connectFolder, disconnectFolder, isFileSystemSupported }) => {
-    const [newApiKey, setNewApiKey] = useState('');
-    const [newApiKeyName, setNewApiKeyName] = useState('');
-    const [newApiKeyType, setNewApiKeyType] = useState<'gemini' | 'huggingface'>('gemini');
-
-    const handleAddKey = () => {
-        if (newApiKey.trim() && newApiKeyName.trim() && !apiKeys.some(k => k.key === newApiKey.trim())) {
-            const updatedKeys = [...apiKeys, {
-                key: newApiKey.trim(),
-                id: `key_${Date.now()}`,
-                name: newApiKeyName.trim(),
-                type: newApiKeyType
-            }];
-            setApiKeys(updatedKeys);
-            apiKeyService.saveApiKeys(updatedKeys);
-            setNewApiKey('');
-            setNewApiKeyName('');
-        }
-    };
-
-    const handleRemoveKey = (id: string) => {
-        const updatedKeys = apiKeys.filter(k => k.id !== id);
-        setApiKeys(updatedKeys);
-        apiKeyService.saveApiKeys(updatedKeys);
-    };
-
-    return (
-        <div className="max-w-4xl mx-auto py-12 px-4 sm:px-0 fade-in space-y-12">
-            <Card title="API Key Management" icon={<SettingsIcon />}>
-                <p className="text-text-secondary">
-                    Provide your own Gemini or Hugging Face API keys/tokens. The app will use the appropriate credentials for generation. Your keys are saved securely in your browser's local storage.
-                </p>
-                <div className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-text-secondary mb-2">Key Name</label>
-                            <input
-                                type="text"
-                                value={newApiKeyName}
-                                onChange={(e) => setNewApiKeyName(e.target.value)}
-                                placeholder="e.g., Personal Key"
-                                className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-text-secondary mb-2">Key Type</label>
-                            <select
-                                value={newApiKeyType}
-                                onChange={(e) => setNewApiKeyType(e.target.value as any)}
-                                className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none"
-                            >
-                                <option value="gemini">Google Gemini</option>
-                                <option value="huggingface">Hugging Face</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div className="flex gap-4">
-                        <input
-                            type="password"
-                            value={newApiKey}
-                            onChange={(e) => setNewApiKey(e.target.value)}
-                            placeholder="Enter new API Key or Token"
-                            className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition"
-                        />
-                        <button onClick={handleAddKey} className="bg-primary text-on-primary font-bold py-4 px-8 rounded-lg hover:bg-primary-hover transition flex-shrink-0 shadow-primary-glow">
-                            Add Key
-                        </button>
-                    </div>
-                </div>
-                <div className="space-y-3 pt-4 border-t border-zinc-800">
-                    <h3 className="text-lg font-semibold text-text-primary">Your API Keys</h3>
-                    {apiKeys.length === 0 ? (
-                        <p className="text-text-secondary italic">No user-provided keys found. The app is using the default keys.</p>
-                    ) : (
-                        <div className="space-y-2">
-                            {apiKeys.map(apiKey => (
-                                <div key={apiKey.id} className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border-l-4" style={{ borderColor: apiKey.type === 'gemini' ? '#4285F4' : '#FFD21E' }}>
-                                    <div className="flex items-center gap-3">
-                                        {apiKey.type === 'gemini' ? <GoogleIcon /> : <HuggingFaceIcon />}
-                                        <div className="flex flex-col">
-                                            <span className="font-semibold text-text-primary">{apiKey.name}</span>
-                                            <span className="font-mono text-xs text-text-secondary">••••••••{apiKey.key.slice(-4)}</span>
-                                        </div>
-                                    </div>
-                                    <button onClick={() => handleRemoveKey(apiKey.id)} className="p-2 text-red-400 hover:bg-red-500/20 rounded-full transition"><TrashIcon /></button>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </Card>
-
-            <Card title="Local Project Folder" icon={<UploadIcon />}>
-                {isFileSystemSupported ? (
-                    <>
-                        <p className="text-text-secondary">
-                            Connect a local folder on your computer to save and load your episodes. This gives you direct control over your project files (.json) and helps avoid browser storage limitations.
-                        </p>
-                        {directoryHandle ? (
-                            <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg space-y-4">
-                               <p className="font-semibold text-green-300">Connected to: <span className="font-mono bg-zinc-800 px-2 py-1 rounded">{directoryHandle.name}</span></p>
-                                <button onClick={disconnectFolder} className="w-full bg-zinc-700 text-on-primary font-bold py-3 px-6 rounded-lg hover:bg-zinc-600 transition">
-                                    Disconnect Folder
-                                </button>
-                            </div>
-                        ) : (
-                             <button onClick={connectFolder} className="w-full bg-gold text-background font-bold py-4 px-10 rounded-lg hover:opacity-90 transition flex justify-center items-center gap-2 text-lg shadow-lg shadow-gold/20">
-                                Connect Folder
-                            </button>
-                        )}
-                    </>
-                ) : (
-                     <p className="text-yellow-400">
-                         Your browser does not support the File System Access API. This feature is unavailable. Please try a modern browser like Chrome or Edge.
-                     </p>
-                )}
-            </Card>
-        </div>
-    );
 };

@@ -13,6 +13,7 @@ export function getApiKeys(): ApiKey[] {
             const parsed = JSON.parse(storedKeys);
             if (Array.isArray(parsed) && parsed.every(item => 
                 typeof item === 'object' && 
+                item !== null &&
                 'key' in item && 
                 'id' in item &&
                 'name' in item &&

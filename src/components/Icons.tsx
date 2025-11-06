@@ -232,29 +232,8 @@ export const SettingsIcon = () => (
     </svg>
 );
 
-export const NormalizeIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h3M18 12h3M6 8l2 8 2-8 2 8 2-8" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18M3 20h18" />
-    </svg>
-);
-
-export const NoiseGateIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 12H3m18 0h-2m-9 0a3 3 0 01-3-3V7a3 3 0 116 0v2a3 3 0 01-3 3z" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18" />
-    </svg>
-);
-
-export const GainIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M18 12h4m-2-2v4" />
-    </svg>
-);
-
 export const HuggingFaceIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         <path d="M9.5 10a.5.5 0 11-1 0 .5.5 0 011 0zM15.5 10a.5.5 0 11-1 0 .5.5 0 011 0z" fill="currentColor" />
     </svg>

@@ -4,9 +4,7 @@ import { decode, encode, concatenatePcm, getPcmChunkDuration, mixAudio } from '.
 import { getApiKeys } from './apiKeyService';
 import { BACKGROUND_AUDIO } from '../assets/backgroundAudio';
 
-// --- API Key Rotation System ---
 const getCombinedApiKeys = (): string[] => {
-    // 1. Get user keys from storage and filter for Gemini keys only
     const userGeminiKeys = getApiKeys()
         .filter(k => k.type === 'gemini')
         .map(k => k.key);
@@ -18,15 +16,9 @@ const getCombinedApiKeys = (): string[] => {
         process.env.API_KEY_3,
     ].filter(Boolean) as string[];
 
-    // User keys are prioritized. A Set prevents duplicates.
     return [...new Set([...userGeminiKeys, ...envKeys])];
 }
 
-/**
- * Translates cryptic API errors into user-friendly, actionable messages.
- * @param error The error object caught from an API call.
- * @returns A string containing a clear, understandable error message.
- */
 function getFriendlyErrorMessage(error: any): string {
   const defaultMessage = "An unexpected error occurred. Please check the console for details.";
   
@@ -34,14 +26,11 @@ function getFriendlyErrorMessage(error: any): string {
 
   let message = error.message || String(error);
 
-  // The Gemini SDK often includes details in a `toString()` method that aren't in `message`.
   const errorString = error.toString();
   if (errorString.includes('[GoogleGenerativeAI Error]')) {
-    // Extract the message part after the prefix
     message = errorString.replace('[GoogleGenerativeAI Error]:', '').trim();
   }
   
-  // User-friendly mappings for common technical errors
   if (message.toLowerCase().includes("api key not valid")) {
     return "Authentication failed: An API key is not valid. Please check your keys in the Settings tab.";
   }
@@ -64,20 +53,10 @@ function getFriendlyErrorMessage(error: any): string {
   return message;
 }
 
-
-/**
- * A wrapper function that handles API key rotation for Gemini API calls.
- * It iterates through the available API keys, retrying the call if a quota-related
- * error is encountered.
- *
- * @param apiCall A function that takes a `GoogleGenAI` instance and performs an API call.
- * @returns The result of the successful API call.
- * @throws An error if all API keys fail or if a non-quota error occurs.
- */
 async function withApiKeyRotation<T>(apiCall: (ai: GoogleGenAI) => Promise<T>): Promise<T> {
   const allApiKeys = getCombinedApiKeys();
   if (allApiKeys.length === 0) {
-    throw new Error("No API keys configured. Please add a key in the Settings tab or set VITE_API_KEY in your environment.");
+    throw new Error("No Gemini API keys configured. Please add a key in the Settings tab or set VITE_API_KEY in your environment.");
   }
 
   let lastError: any = null;
@@ -86,7 +65,7 @@ async function withApiKeyRotation<T>(apiCall: (ai: GoogleGenAI) => Promise<T>): 
     try {
       const ai = new GoogleGenAI({ apiKey });
       const result = await apiCall(ai);
-      return result; // Success, return immediately
+      return result;
     } catch (e: any) {
       lastError = e;
       const errorMessage = (e?.message || e.toString()).toLowerCase();
@@ -95,18 +74,14 @@ async function withApiKeyRotation<T>(apiCall: (ai: GoogleGenAI) => Promise<T>): 
         console.warn(`API key failed due to quota issue. Switching to the next key.`);
         continue;
       } else {
-        // Not a quota error, fail fast with a user-friendly message
         throw new Error(getFriendlyErrorMessage(e));
       }
     }
   }
 
-  // If the loop completes, all keys have failed due to quota issues
   throw new Error(`All API keys have reached their usage limits. Please try again later. Last error: ${getFriendlyErrorMessage(lastError)}`);
 }
 
-
-// --- Interfaces & Types ---
 interface Branding {
     name?: string;
     contact?: string;
@@ -115,9 +90,6 @@ interface Branding {
 }
 
 type Accent = 'Default' | 'South African';
-
-
-// --- Core Service Functions ---
 
 export async function generateScript(
     topic: string | undefined, 
@@ -328,14 +300,14 @@ export async function generatePodcastAudio(
     const rawAudioChunks: Uint8Array[] = [];
     const timings: ScriptTiming[] = [];
     let cumulativeTime = 0;
-
+    
     const hostVoiceConfigs = new Map<string, VoiceConfig>();
     hostVoiceConfigs.set(samanthaName, samanthaVoiceConfig);
     hostVoiceConfigs.set(stewardName, stewardVoiceConfig);
     if (guestHosts) {
         guestHosts.forEach(g => hostVoiceConfigs.set(g.name, g.voiceConfig));
     }
-    
+
     for (const line of script) {
         const voiceConfig = hostVoiceConfigs.get(line.speaker);
         
@@ -380,16 +352,16 @@ export async function generatePodcastAudio(
         cumulativeTime += duration;
     }
 
+
     if (finalAudioChunks.length === 0) {
         throw new Error("Audio generation resulted in no audio data.");
     }
 
     let concatenatedPcm = concatenatePcm(finalAudioChunks);
-
-    // Mix background audio if selected
-    if (backgroundSound !== 'none' && BACKGROUND_AUDIO[backgroundSound]) {
-        const backgroundPcm = decode(BACKGROUND_AUDIO[backgroundSound].data);
-        concatenatedPcm = mixAudio(concatenatedPcm, backgroundPcm, backgroundVolume);
+    
+    if (backgroundSound && BACKGROUND_AUDIO[backgroundSound]) {
+        const bgPcm = decode(BACKGROUND_AUDIO[backgroundSound].data);
+        concatenatedPcm = mixAudio(concatenatedPcm, bgPcm, backgroundVolume);
     }
 
     const finalAudioData = encode(concatenatedPcm);
