@@ -312,7 +312,7 @@ export async function generatePodcastAudio(
     guestHosts?: { name: string; voiceConfig: VoiceConfig; }[],
     accent: Accent = 'South African'
 ): Promise<{ audioData: string; timings: ScriptTiming[] }> {
-    const rawAudioChunks: (Uint8Array | null)[] = [];
+    const rawAudioChunks: Uint8Array[] = [];
     const timings: ScriptTiming[] = [];
     let cumulativeTime = 0;
     
@@ -323,26 +323,25 @@ export async function generatePodcastAudio(
         guestHosts.forEach(g => hostVoiceConfigs.set(g.name, g.voiceConfig));
     }
     
-    // First pass: generate all audio chunks sequentially with a delay
-    for (const line of script) {
+    // First pass: generate all audio chunks sequentially.
+    // Errors from generateSingleSpeakerAudio will now propagate up and be caught by the UI,
+    // providing a much more specific error message to the user.
+    for (const [index, line] of script.entries()) {
         const voiceConfig = hostVoiceConfigs.get(line.speaker);
         
         if (voiceConfig) {
-            try {
-                const base64Chunk = await generateSingleSpeakerAudio(line.dialogue, voiceConfig, line.cue);
-                rawAudioChunks.push(decode(base64Chunk));
-            } catch(e) {
-                console.error(`Failed to generate audio for line: "${line.dialogue}"`, e);
-                rawAudioChunks.push(null); // Push null to indicate failure for this line
-            }
+            const base64Chunk = await generateSingleSpeakerAudio(line.dialogue, voiceConfig, line.cue);
+            rawAudioChunks.push(decode(base64Chunk));
         } else {
             console.warn(`Unknown speaker in script: ${line.speaker}`);
-            rawAudioChunks.push(null); // Push null to maintain index alignment
+            rawAudioChunks.push(new Uint8Array(0)); // Push empty chunk to maintain index alignment
         }
         
-        // IMPORTANT: Wait for 21 seconds between each request to stay under the
-        // 3 requests/minute limit of the free tier TTS model.
-        await new Promise(resolve => setTimeout(resolve, 21000));
+        // IMPORTANT: Wait between requests to stay under the free tier rate limit.
+        // We skip the wait on the very last item.
+        if (index < script.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 21000));
+        }
     }
 
     if (rawAudioChunks.length !== script.length) {
@@ -354,14 +353,17 @@ export async function generatePodcastAudio(
     // Second pass: process interruptions and calculate timings
     for (let i = 0; i < script.length; i++) {
         let pcmChunk = rawAudioChunks[i];
-        if (!pcmChunk || pcmChunk.length === 0) continue;
-
+        if (pcmChunk.length === 0) continue;
+        
+        // If the *next* line is an interruption, truncate *this* line's audio slightly
+        // to create a more natural-sounding overlap effect.
         if (script[i + 1]?.isInterruption) {
             const originalDuration = getPcmChunkDuration(pcmChunk, 24000, 16);
             const cutoffDuration = 0.25; // Cut off the last 250ms
 
             if (originalDuration > cutoffDuration) {
                 const bytesToKeep = Math.floor((originalDuration - cutoffDuration) * 24000 * 2); // sampleRate * bytesPerSample
+                // Ensure bytesToKeep is an even number for 16-bit samples
                 const finalBytes = bytesToKeep - (bytesToKeep % 2);
                 pcmChunk = pcmChunk.slice(0, finalBytes);
             }
@@ -380,7 +382,9 @@ export async function generatePodcastAudio(
 
 
     if (finalAudioChunks.length === 0) {
-        throw new Error("Audio generation resulted in no audio data. This might be due to an API error on every line.");
+        // This error should now only trigger if the script was empty or all lines failed silently (unlikely).
+        // The more specific API errors from generateSingleSpeakerAudio will be caught first.
+        throw new Error("Audio generation resulted in no audio data. This could be because the script was empty or contained only unknown speakers.");
     }
 
     const concatenatedPcm = concatenatePcm(finalAudioChunks);
