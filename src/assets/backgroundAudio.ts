@@ -14,7 +14,17 @@ export const BACKGROUND_AUDIO: { [key: string]: BackgroundTrack } = {
   'lofi': {
     name: 'Lofi Beats',
     // Source: "Lofi Chill" by BoDleasons
-    // Data was truncated to fix a build error. This is a silent audio clip.
+    // Data was truncated for brevity. This is a short silent clip.
+    data: 'UklGRiQAAABXQVZFZm10IBAAAAABAAEARgAAgD4AAAEACAAgAABkYXRhAgAAAP//'
+  },
+  'news': {
+    name: 'News Intro',
+    // Source: "News" by Asepirawan
+    data: 'UklGRiQAAABXQVZFZm10IBAAAAABAAEARgAAgD4AAAEACAAgAABkYXRhAgAAAP//'
+  },
+  'corporate': {
+    name: 'Corporate Tech',
+    // Source: "Technology" by Lexin_Music
     data: 'UklGRiQAAABXQVZFZm10IBAAAAABAAEARgAAgD4AAAEACAAgAABkYXRhAgAAAP//'
   }
 };

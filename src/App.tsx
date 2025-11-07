@@ -4,8 +4,9 @@ import { generateScript, generatePodcastAudio, previewVoice, previewClonedVoice,
 import { getKeys, addKey, deleteKey } from './services/apiKeyService';
 import { getEpisodes, setEpisodes, clearEpisodes } from './services/episodeService';
 import { extractTextFromPdf } from './services/pdfService';
-import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence } from './utils/audioUtils';
+import { decode, pcmToWav, decodeAudioData as customDecodeAudioData, combineCustomAudioSamples, concatenatePcm, encode, audioBlobToPcmBase64, applyFade, generateSilence, mixAudio, normalize } from './utils/audioUtils';
 import { UploadIcon, ScriptIcon, AudioIcon, PlayIcon, PauseIcon, LoaderIcon, ErrorIcon, MicIcon, PlayCircleIcon, DownloadIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, RestartIcon, CheckIcon, EditIcon, VolumeHighIcon, VolumeMuteIcon, RewindIcon, ForwardIcon, CloseIcon, WhatsAppIcon, EmailIcon, VideoIcon, CutIcon, CopyIcon, WandIcon, InfoIcon, TrimIcon, FadeInIcon, SilenceIcon, ZoomInIcon, ZoomOutIcon, PlusIcon, SettingsIcon, ExportIcon, ImportIcon, WarningIcon } from './components/Icons';
+import { BACKGROUND_AUDIO } from './assets/backgroundAudio';
 
 type ActiveTab = 'creator' | 'editor' | 'about' | 'settings';
 

@@ -1,15 +1,26 @@
-import { get, set, clear as clearDb } from 'idb-keyval';
+import { get, set } from 'idb-keyval';
 import { Episode } from '../types';
 
 const DB_KEY = 'podcast-episodes';
+
+const canUseDB = !!window.indexedDB;
 
 /**
  * Retrieves all stored episodes from IndexedDB.
  * @returns A promise that resolves to an array of Episode objects.
  */
 export async function getEpisodes(): Promise<Episode[]> {
-  const episodes = await get<Episode[]>(DB_KEY);
-  return episodes || [];
+  if (!canUseDB) {
+    console.warn("IndexedDB not available. Skipping getEpisodes.");
+    return [];
+  }
+  try {
+    const episodes = await get<Episode[]>(DB_KEY);
+    return episodes || [];
+  } catch (error) {
+    console.warn("Could not access IndexedDB for episodes. This is expected in some secure environments. Falling back to an empty array.", error);
+    return [];
+  }
 }
 
 /**
@@ -18,7 +29,15 @@ export async function getEpisodes(): Promise<Episode[]> {
  * @returns A promise that resolves when the operation is complete.
  */
 export async function setEpisodes(episodes: Episode[]): Promise<void> {
-  await set(DB_KEY, episodes);
+  if (!canUseDB) {
+    console.warn("IndexedDB not available. Skipping setEpisodes.");
+    return;
+  }
+  try {
+    await set(DB_KEY, episodes);
+  } catch (error) {
+    console.warn("Could not access IndexedDB to set episodes.", error);
+  }
 }
 
 /**
@@ -26,8 +45,13 @@ export async function setEpisodes(episodes: Episode[]): Promise<void> {
  * @returns A promise that resolves when the operation is complete.
  */
 export async function clearEpisodes(): Promise<void> {
-    // Note: idb-keyval's clear() clears the entire database, which is fine
-    // as we are scoping this app's DB to this one store.
-    // If multiple stores were used, we'd use del(DB_KEY) instead.
-    await set(DB_KEY, []);
+    if (!canUseDB) {
+      console.warn("IndexedDB not available. Skipping clearEpisodes.");
+      return;
+    }
+    try {
+        await set(DB_KEY, []);
+    } catch (error) {
+        console.warn("Could not access IndexedDB to clear episodes.", error);
+    }
 }

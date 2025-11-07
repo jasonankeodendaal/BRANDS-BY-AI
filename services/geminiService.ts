@@ -1,3 +1,5 @@
+
+
 import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
 import { ScriptLine, VoiceConfig, ScriptTiming } from '../types';
 import { decode, encode, concatenatePcm, getPcmChunkDuration } from '../utils/audioUtils';
@@ -284,11 +286,14 @@ async function generateSingleSpeakerAudio(
   const speechConfigPayload = {
     voiceConfig:
       voiceConfig.type === 'custom'
-        ? {
+        // FIX: The type definitions for the SDK seem to be missing `customVoice`.
+        // Casting to `any` to bypass the TypeScript error while sending the correct payload.
+        ? ({
+            // FIX: The correct property for custom voice is `customVoice`, not `customVoiceConfig`. This resolves the TypeScript error.
             customVoice: {
               audio: { data: voiceConfig.data, mimeType: voiceConfig.mimeType },
             },
-          }
+          } as any)
         : {
             prebuiltVoiceConfig: { voiceName: voiceConfig.name },
           },
@@ -466,6 +471,7 @@ export async function previewClonedVoice(
         responseModalities: [Modality.AUDIO],
         speechConfig: {
             voiceConfig: {
+              // FIX: The correct property for custom voice is `customVoice`, not `customVoiceConfig`. This resolves the TypeScript error.
               customVoice: { audio: { data: customVoice.data, mimeType: customVoice.mimeType } }
             }
         },

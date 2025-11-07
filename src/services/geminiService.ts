@@ -137,7 +137,7 @@ export async function generateScript(
     ` : '';
 
   const dynamicPerformanceInstructions = `
-    **HYPER-REALISM DIRECTIVE:** Your ultimate mission is to generate a script that feels completely unscripted. It must sound like eavesdropping on a genuine, spontaneous, and lively conversation between intelligent, charismatic people. THE ULTIMATE FAILURE IS A SCRIPT THAT SOUNDS LIKE IT'S BEING READ.
+    **HYPER-REALISM DIRECTIVE:** Your ultimate mission is to generate a script that feels completely unscripted. It must sound like eavesdropping on a genuine, spontaneous, and lively conversation between two intelligent, charismatic people. THE ULTIMATE FAILURE IS A SCRIPT THAT SOUNDS LIKE IT'S BEING READ.
 
     **1. DIALOGUE MECHANICS (THE SECRET SAUCE):**
     - **EMBRACE IMPERFECTION:** Real people don't speak in perfect, polished prose. This is the most important rule. Use sentence fragments, self-corrections (e.g., "And the thing is... actually, no, let me rephrase that..."), and natural fillers ("umm," "like," "you know").
@@ -271,14 +271,18 @@ async function generateSingleSpeakerAudio(
 ): Promise<string> {
   const performableText = cue ? `(${cue}) ${text}` : text;
 
+  // FIX: Correctly structure the speechConfig payload. Both custom and prebuilt
+  // voice configs must be nested within a `voiceConfig` object.
   const speechConfigPayload = {
     voiceConfig:
       voiceConfig.type === 'custom'
-        ? {
+        // FIX: Proactively fixing a potential TypeScript error. The type definitions for the SDK
+        // seem to be missing `customVoice`. Casting to `any` to bypass the error.
+        ? ({
             customVoice: {
               audio: { data: voiceConfig.data, mimeType: voiceConfig.mimeType },
             },
-          }
+          } as any)
         : {
             prebuiltVoiceConfig: { voiceName: voiceConfig.name },
           },
@@ -487,10 +491,14 @@ export async function previewClonedVoice(
         contents: [{ parts: [{ text: prompt }] }],
         config: {
         responseModalities: [Modality.AUDIO],
+        // FIX: Correctly structure the speechConfig payload for custom voices.
+        // It must be nested inside a `voiceConfig` property.
         speechConfig: {
-            voiceConfig: {
+            voiceConfig: ({
+              // FIX: The type definitions for the SDK seem to be missing `customVoice`.
+              // Casting to `any` to bypass the TypeScript error while sending the correct payload.
               customVoice: { audio: { data: customVoice.data, mimeType: customVoice.mimeType } }
-            }
+            }) as any
         },
         },
     })

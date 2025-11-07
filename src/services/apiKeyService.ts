@@ -3,13 +3,24 @@ import { ApiKey } from '../types';
 
 const DB_KEY = 'user-api-keys';
 
+const canUseDB = !!window.indexedDB;
+
 /**
  * Retrieves all stored API keys from IndexedDB.
  * @returns A promise that resolves to an array of ApiKey objects.
  */
 export async function getKeys(): Promise<ApiKey[]> {
-  const keys = await get<ApiKey[]>(DB_KEY);
-  return keys || [];
+  if (!canUseDB) {
+    console.warn("IndexedDB not available. Skipping getKeys.");
+    return [];
+  }
+  try {
+    const keys = await get<ApiKey[]>(DB_KEY);
+    return keys || [];
+  } catch (error) {
+    console.warn("Could not access IndexedDB for API keys. This is expected in some secure environments. Falling back to an empty array.", error);
+    return [];
+  }
 }
 
 /**
@@ -18,11 +29,19 @@ export async function getKeys(): Promise<ApiKey[]> {
  * @returns A promise that resolves when the operation is complete.
  */
 export async function addKey(newKey: ApiKey): Promise<void> {
-  const keys = await getKeys();
-  // Prevent adding duplicate keys
-  if (!keys.some(k => k.key === newKey.key && k.provider === newKey.provider)) {
-    const updatedKeys = [...keys, newKey];
-    await set(DB_KEY, updatedKeys);
+  if (!canUseDB) {
+    console.warn("IndexedDB not available. Skipping addKey.");
+    return;
+  }
+  try {
+    const keys = await getKeys();
+    // Prevent adding duplicate keys
+    if (!keys.some(k => k.key === newKey.key && k.provider === newKey.provider)) {
+      const updatedKeys = [...keys, newKey];
+      await set(DB_KEY, updatedKeys);
+    }
+  } catch (error) {
+    console.warn("Could not access IndexedDB to add API key.", error);
   }
 }
 
@@ -32,7 +51,15 @@ export async function addKey(newKey: ApiKey): Promise<void> {
  * @returns A promise that resolves when the operation is complete.
  */
 export async function deleteKey(keyId: string): Promise<void> {
-  const keys = await getKeys();
-  const updatedKeys = keys.filter(k => k.id !== keyId);
-  await set(DB_KEY, updatedKeys);
+  if (!canUseDB) {
+    console.warn("IndexedDB not available. Skipping deleteKey.");
+    return;
+  }
+  try {
+    const keys = await getKeys();
+    const updatedKeys = keys.filter(k => k.id !== keyId);
+    await set(DB_KEY, updatedKeys);
+  } catch (error) {
+    console.warn("Could not access IndexedDB to delete API key.", error);
+  }
 }
