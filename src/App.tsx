@@ -480,6 +480,8 @@ interface StepScriptAndAudioProps {
   setWebsite: (site: string) => void;
   slogan: string;
   setSlogan: (slogan: string) => void;
+  backgroundSound: string;
+  setBackgroundSound: (sound: string) => void;
   script: ScriptLine[] | null;
   setScript: (script: ScriptLine[]) => void;
   setCurrentStep: (step: number) => void;
@@ -488,7 +490,7 @@ interface StepScriptAndAudioProps {
 
 const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
   error, isLoadingAudio, brandedName, setBrandedName, contactDetails, setContactDetails, website,
-  setWebsite, slogan, setSlogan, script, setScript, setCurrentStep, handleGenerateAudio
+  setWebsite, slogan, setSlogan, backgroundSound, setBackgroundSound, script, setScript, setCurrentStep, handleGenerateAudio
 }) => {
     const [isEditing, setIsEditing] = useState(false);
     if (!script) return null;
@@ -511,9 +513,15 @@ const StepScriptAndAudio: React.FC<StepScriptAndAudioProps> = ({
                             <input type="text" placeholder="Contact Details (e.g., email)" value={contactDetails} onChange={(e) => setContactDetails(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Website (e.g., yoursite.com)" value={website} onChange={(e) => setWebsite(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
                             <input type="text" placeholder="Slogan" value={slogan} onChange={(e) => setSlogan(e.target.value)} className="w-full text-lg bg-transparent placeholder:text-text-secondary border-b-2 border-zinc-700 p-4 focus:outline-none focus:border-gold transition" />
-                        </div>
-                         <div className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg text-center text-sm text-text-secondary">
-                            <p>To enable advanced features like interactive script playback, background audio is not available at this step.</p>
+                             <div>
+                                <label htmlFor="background-sound" className="block text-md font-bold text-text-primary mb-2">Background Sound</label>
+                                <select id="background-sound" value={backgroundSound} onChange={(e) => setBackgroundSound(e.target.value)} className="w-full text-lg bg-zinc-800 border border-zinc-700 rounded-lg p-4 focus:ring-2 focus:ring-gold focus:border-gold transition appearance-none">
+                                    <option value="none">None</option>
+                                    {Object.entries(BACKGROUND_AUDIO).map(([key, track]) => (
+                                        <option key={key} value={key}>{track.name}</option>
+                                    ))}
+                                </select>
+                            </div>
                         </div>
                         <div className="pt-8 border-t border-zinc-800 flex justify-between items-center">
                             <button onClick={() => { setScript([]); setCurrentStep(2); }} className="font-bold py-4 px-10 rounded-lg hover:bg-zinc-800 transition flex items-center gap-2 text-lg">
@@ -1294,6 +1302,7 @@ export default function App() {
   const [contactDetails, setContactDetails] = useState('');
   const [website, setWebsite] = useState('');
   const [slogan, setSlogan] = useState('');
+  const [backgroundSound, setBackgroundSound] = useState<string>('none');
   
   // Step 4
   const [audioData, setAudioData] = useState<string | null>(null);
@@ -1331,6 +1340,7 @@ export default function App() {
       setGuestHosts([]); setGuestStates({});
       setScript(null); setAudioData(null); setScriptTimings(null);
       setBrandedName('Brands by Ai'); setContactDetails(''); setWebsite(''); setSlogan('');
+      setBackgroundSound('none');
       setError(''); setIsLoadingScript(false); setIsLoadingAudio(false);
       setAreTimingsStale(false); setAdText(null); setAdScript(null);
       
@@ -1437,7 +1447,7 @@ export default function App() {
             name: guest.name,
             voiceConfig: await getVoiceConfig(guest.customSamples, guest.voice)
         })));
-        const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, guestHostPayloads, 'South African');
+        const { audioData, timings } = await generatePodcastAudio( script, samanthaName || 'Samantha', stewardName || 'Steward', samanthaVoiceConfig, stewardVoiceConfig, guestHostPayloads, 'South African', backgroundSound !== 'none' ? backgroundSound : undefined);
 
         setAudioData(audioData); 
         setScriptTimings(timings); 
@@ -1448,7 +1458,7 @@ export default function App() {
     } finally {
       setIsLoadingAudio(false);
     }
-  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, samanthaName, stewardName, guestHosts]);
+  }, [script, samanthaVoice, stewardVoice, samanthaCustomSamples, stewardCustomSamples, samanthaName, stewardName, guestHosts, backgroundSound]);
 
   const handleDownloadAudio = () => {
     if (!audioData) return;
@@ -1626,7 +1636,7 @@ export default function App() {
     const episodeData: Omit<Episode, 'id' | 'title' | 'episodeNumber'> = {
         samanthaName, stewardName, samanthaVoice, samanthaCustomSamples, stewardVoice, stewardCustomSamples, guestHosts,
         prompt, pdfText, fileName, manualScriptText, customRules, language, episodeLength,
-        script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound: 'none', audioData,
+        script, scriptTimings, brandedName, contactDetails, website, slogan, backgroundSound, audioData,
         adText, adScript
     };
 
@@ -1657,6 +1667,7 @@ export default function App() {
     setManualScriptText(ep.manualScriptText); setCustomRules(ep.customRules); setLanguage(ep.language); setEpisodeLength(ep.episodeLength || 10);
     setScript(ep.script); setScriptTimings(ep.scriptTimings); setBrandedName(ep.brandedName);
     setContactDetails(ep.contactDetails); setWebsite(ep.website); setSlogan(ep.slogan);
+    setBackgroundSound(ep.backgroundSound || 'none');
     setAudioData(ep.audioData); setEpisodeTitle(ep.title); setEpisodeNumber(ep.episodeNumber);
     setLoadedEpisodeId(ep.id);
     setAdText(ep.adText || null); setAdScript(ep.adScript || null);
@@ -1712,7 +1723,7 @@ export default function App() {
     switch(currentStep) {
       case 1: return <StepHosts error={error} setError={setError} samanthaName={samanthaName} setSamanthaName={setSamanthaName} stewardName={stewardName} setStewardName={setStewardName} samanthaVoice={samanthaVoice} setSamanthaVoice={setSamanthaVoice} stewardVoice={stewardVoice} setStewardVoice={setStewardVoice} isPreviewingSamantha={isPreviewingSamantha} isPreviewingSteward={isPreviewingSteward} handlePreviewVoice={handlePreviewVoice} femaleVoices={femaleVoices} maleVoices={maleVoices} areHostsValid={areHostsValid} setCurrentStep={setCurrentStep} samanthaCustomSamples={samanthaCustomSamples} isPreviewingSamanthaCustom={isPreviewingSamanthaCustom} isRecordingSamantha={isRecordingSamantha} samanthaAudioFileInputRef={samanthaAudioFileInputRef} stewardCustomSamples={stewardCustomSamples} isPreviewingStewardCustom={isPreviewingStewardCustom} isRecordingSteward={isRecordingSteward} stewardAudioFileInputRef={stewardAudioFileInputRef} handlePreviewCustomVoice={handlePreviewCustomVoice} handleRemoveCustomAudio={handleRemoveCustomAudio} handleToggleRecording={handleToggleRecording} handleAudioFileChange={handleAudioFileChange} isPreviewingQuality={isPreviewingQuality} handlePreviewQuality={handlePreviewQuality} guestHosts={guestHosts} handleAddGuest={handleAddGuest} handleRemoveGuest={handleRemoveGuest} handleUpdateGuest={handleUpdateGuest} guestStates={guestStates} guestAudioFileInputRefs={guestAudioFileInputRefs} />;
       case 2: return <StepContent error={error} episodeTitle={episodeTitle} setEpisodeTitle={setEpisodeTitle} episodeNumber={episodeNumber} setEpisodeNumber={setEpisodeNumber} episodeLength={episodeLength} setEpisodeLength={setEpisodeLength} language={language} setLanguage={setLanguage} prompt={prompt} setPrompt={setPrompt} fileName={fileName} fileInputRef={fileInputRef} handleFileChange={handleFileChange} samanthaName={samanthaName} stewardName={stewardName} manualScriptText={manualScriptText} setManualScriptText={setManualScriptText} customRules={customRules} setCustomRules={setCustomRules} setCurrentStep={setCurrentStep} handleGenerateScript={handleGenerateScript} isLoadingScript={isLoadingScript} areContentInputsValid={areContentInputsValid} />;
-      case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} />;
+      case 3: return <StepScriptAndAudio error={error} isLoadingAudio={isLoadingAudio} brandedName={brandedName} setBrandedName={setBrandedName} contactDetails={contactDetails} setContactDetails={setContactDetails} website={website} setWebsite={setWebsite} slogan={slogan} setSlogan={setSlogan} script={script} setScript={setScript as (s: ScriptLine[]) => void} setCurrentStep={setCurrentStep} handleGenerateAudio={handleGenerateAudio} backgroundSound={backgroundSound} setBackgroundSound={setBackgroundSound} />;
       case 4: return script && audioData && scriptTimings ? <StepStudio audioData={audioData} setAudioData={setAudioData} script={script} scriptTimings={scriptTimings} handleDownloadAudio={handleDownloadAudio} handleStartOver={handleStartOver} handleSaveOrUpdateEpisode={handleSaveOrUpdateEpisode} loadedEpisodeId={loadedEpisodeId} areTimingsStale={areTimingsStale} setAreTimingsStale={setAreTimingsStale} adText={adText} setAdText={setAdText} adScript={adScript} setAdScript={setAdScript} episodeTitle={episodeTitle} brandedName={brandedName}/> : <div>Loading...</div>;
       default: return <div />;
     }

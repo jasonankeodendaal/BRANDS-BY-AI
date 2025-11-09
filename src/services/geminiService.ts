@@ -1,7 +1,8 @@
 import { GoogleGenAI, Type, Modality, GenerateContentResponse } from "@google/genai";
 import { ScriptLine, VoiceConfig, ScriptTiming, GuestHost } from '../types';
-import { decode, encode, concatenatePcm, getPcmChunkDuration } from '../utils/audioUtils';
+import { decode, encode, concatenatePcm, getPcmChunkDuration, mixAudio, normalize } from '../utils/audioUtils';
 import { getKeys as getApiKeys } from './apiKeyService';
+import { BACKGROUND_AUDIO } from "../assets/backgroundAudio";
 
 
 /**
@@ -271,13 +272,9 @@ async function generateSingleSpeakerAudio(
 ): Promise<string> {
   const performableText = cue ? `(${cue}) ${text}` : text;
 
-  // FIX: Correctly structure the speechConfig payload. Both custom and prebuilt
-  // voice configs must be nested within a `voiceConfig` object.
   const speechConfigPayload = {
     voiceConfig:
       voiceConfig.type === 'custom'
-        // FIX: Proactively fixing a potential TypeScript error. The type definitions for the SDK
-        // seem to be missing `customVoice`. Casting to `any` to bypass the error.
         ? ({
             customVoice: {
               audio: { data: voiceConfig.data, mimeType: voiceConfig.mimeType },
@@ -314,7 +311,8 @@ export async function generatePodcastAudio(
     samanthaVoiceConfig: VoiceConfig, 
     stewardVoiceConfig: VoiceConfig,
     guestHosts?: { name: string; voiceConfig: VoiceConfig; }[],
-    accent: Accent = 'South African'
+    accent: Accent = 'South African',
+    backgroundSoundKey?: string
 ): Promise<{ audioData: string; timings: ScriptTiming[] }> {
     const rawAudioChunks: Uint8Array[] = [];
     const timings: ScriptTiming[] = [];
@@ -327,9 +325,6 @@ export async function generatePodcastAudio(
         guestHosts.forEach(g => hostVoiceConfigs.set(g.name, g.voiceConfig));
     }
     
-    // First pass: generate all audio chunks sequentially.
-    // Errors from generateSingleSpeakerAudio will now propagate up and be caught by the UI,
-    // providing a much more specific error message to the user.
     for (const [index, line] of script.entries()) {
         const voiceConfig = hostVoiceConfigs.get(line.speaker);
         
@@ -338,11 +333,9 @@ export async function generatePodcastAudio(
             rawAudioChunks.push(decode(base64Chunk));
         } else {
             console.warn(`Unknown speaker in script: ${line.speaker}`);
-            rawAudioChunks.push(new Uint8Array(0)); // Push empty chunk to maintain index alignment
+            rawAudioChunks.push(new Uint8Array(0));
         }
         
-        // IMPORTANT: Wait between requests to stay under the free tier rate limit.
-        // We skip the wait on the very last item.
         if (index < script.length - 1) {
             await new Promise(resolve => setTimeout(resolve, 21000));
         }
@@ -354,20 +347,16 @@ export async function generatePodcastAudio(
     
     const finalAudioChunks: Uint8Array[] = [];
 
-    // Second pass: process interruptions and calculate timings
     for (let i = 0; i < script.length; i++) {
         let pcmChunk = rawAudioChunks[i];
         if (pcmChunk.length === 0) continue;
         
-        // If the *next* line is an interruption, truncate *this* line's audio slightly
-        // to create a more natural-sounding overlap effect.
         if (script[i + 1]?.isInterruption) {
             const originalDuration = getPcmChunkDuration(pcmChunk, 24000, 16);
-            const cutoffDuration = 0.25; // Cut off the last 250ms
+            const cutoffDuration = 0.25;
 
             if (originalDuration > cutoffDuration) {
-                const bytesToKeep = Math.floor((originalDuration - cutoffDuration) * 24000 * 2); // sampleRate * bytesPerSample
-                // Ensure bytesToKeep is an even number for 16-bit samples
+                const bytesToKeep = Math.floor((originalDuration - cutoffDuration) * 24000 * 2);
                 const finalBytes = bytesToKeep - (bytesToKeep % 2);
                 pcmChunk = pcmChunk.slice(0, finalBytes);
             }
@@ -384,15 +373,19 @@ export async function generatePodcastAudio(
         cumulativeTime += duration;
     }
 
-
     if (finalAudioChunks.length === 0) {
-        // This error should now only trigger if the script was empty or all lines failed silently (unlikely).
-        // The more specific API errors from generateSingleSpeakerAudio will be caught first.
-        throw new Error("Audio generation resulted in no audio data. This could be because the script was empty or contained only unknown speakers.");
+        throw new Error("Audio generation resulted in no audio data.");
     }
 
-    const concatenatedPcm = concatenatePcm(finalAudioChunks);
-    const finalAudioData = encode(concatenatedPcm);
+    let finalPcm = concatenatePcm(finalAudioChunks);
+
+    if (backgroundSoundKey && BACKGROUND_AUDIO[backgroundSoundKey]) {
+        const normalizedVoicePcm = normalize(finalPcm, 0.9);
+        const backgroundPcm = decode(BACKGROUND_AUDIO[backgroundSoundKey].data);
+        finalPcm = mixAudio(normalizedVoicePcm, backgroundPcm, 0.2);
+    }
+    
+    const finalAudioData = encode(finalPcm);
 
     return { audioData: finalAudioData, timings };
 }
@@ -414,7 +407,6 @@ export async function generateQualityPreviewAudio(
     const samanthaVoiceConfig: VoiceConfig = { type: 'prebuilt', name: samanthaVoice };
     const stewardVoiceConfig: VoiceConfig = { type: 'prebuilt', name: stewardVoice };
 
-    // Create a temporary, minimal version of generatePodcastAudio to avoid the long delay for previews
     const audioChunks: Uint8Array[] = [];
      for (const line of previewScript) {
         let voiceConfig: VoiceConfig | undefined;
@@ -491,12 +483,8 @@ export async function previewClonedVoice(
         contents: [{ parts: [{ text: prompt }] }],
         config: {
         responseModalities: [Modality.AUDIO],
-        // FIX: Correctly structure the speechConfig payload for custom voices.
-        // It must be nested inside a `voiceConfig` property.
         speechConfig: {
             voiceConfig: ({
-              // FIX: The type definitions for the SDK seem to be missing `customVoice`.
-              // Casting to `any` to bypass the TypeScript error while sending the correct payload.
               customVoice: { audio: { data: customVoice.data, mimeType: customVoice.mimeType } }
             }) as any
         },
